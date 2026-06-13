@@ -31,11 +31,11 @@
         android:textStyle="bold" />
 
     <ImageButton
-        android:id="@+id/signalButton"
+        android:id="@+id/settingsButton"
         android:layout_width="46dp"
         android:layout_height="46dp"
         android:background="@drawable/circle_cyan"
-        android:contentDescription="@string/live_mood"
+        android:contentDescription="Settings"
         android:padding="11dp"
-        android:src="@drawable/ic_sensors" />
+        android:src="@drawable/ic_settings" />
 </LinearLayout>

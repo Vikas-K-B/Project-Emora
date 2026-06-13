@@ -1,17 +1,29 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <!-- MoodSync AI Design System Colors -->
     <color name="black">#FF000000</color>
     <color name="white">#FFFFFFFF</color>
-    <color name="mood_background">#0B1326</color>
-    <color name="mood_background_deep">#060E20</color>
-    <color name="mood_surface">#172033</color>
-    <color name="mood_surface_high">#222A3D</color>
-    <color name="mood_text">#DAE2FD</color>
-    <color name="mood_text_muted">#AAB7C8</color>
-    <color name="mood_text_dim">#718094</color>
-    <color name="mood_cyan">#63F7FF</color>
-    <color name="mood_cyan_dim">#00DCE5</color>
-    <color name="mood_violet">#DDB7FF</color>
-    <color name="mood_pink">#FFAFD3</color>
-    <color name="mood_peach">#FFB4AB</color>
+    
+    <color name="mood_background">#0b1326</color>
+    <color name="mood_background_deep">#060e20</color>
+    
+    <color name="mood_surface">#171f33</color>
+    <color name="mood_surface_high">#222a3d</color>
+    <color name="mood_surface_highest">#2d3449</color>
+    
+    <color name="mood_text">#dae2fd</color>
+    <color name="mood_text_muted">#b9caca</color>
+    <color name="mood_text_dim">#849495</color>
+    
+    <color name="mood_cyan">#00f5ff</color>
+    <color name="mood_cyan_dim">#00dce5</color>
+    <color name="mood_cyan_bright">#e9feff</color>
+    
+    <color name="mood_violet">#ddb7ff</color>
+    <color name="mood_pink">#ffafd3</color>
+    <color name="mood_peach">#ffb4ab</color>
+    
+    <!-- Specific surface containers from design system -->
+    <color name="surface_container_low">#131b2e</color>
+    <color name="outline_variant">#3a494a</color>
 </resources>

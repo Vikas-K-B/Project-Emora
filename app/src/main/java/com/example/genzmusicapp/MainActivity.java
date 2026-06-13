@@ -39,6 +39,8 @@ import android.widget.Toast;
 import android.content.SharedPreferences;
 import android.widget.EditText;
 import android.widget.ProgressBar;
+import com.google.android.material.chip.Chip;
+import com.google.android.material.chip.ChipGroup;
 import androidx.activity.EdgeToEdge;
 import androidx.activity.OnBackPressedCallback;
 import androidx.activity.result.ActivityResultLauncher;
@@ -94,6 +96,7 @@ public class MainActivity extends AppCompatActivity {
     private static final String SCREEN_LIVE = "live";
     private static final String SCREEN_PLAYER = "player";
     private static final String SCREEN_SETTINGS = "settings";
+    private static final String SCREEN_PREFERENCES = "preferences";
 
     private static final String DEVICE_IMAGE_URL =
             "https://lh3.googleusercontent.com/aida-public/AB6AXuCwprrlfC4teTJ4gg_c0-xg_Ff94DbAN7TBpUFuDMPAeILcbS_2n4xN-e2PNM2hjeEba6SO9Fuv-CsOQ5dG2V034xMWo_3hUEbo75Ui-6Lc53Q2PF8hlj72yG6L89d6u_wHU-T6-piKm_IPGhKvp5gjUquChSZhNKjxSijVhmdmk__GPkuSWZdtvE2TXhlC4iaFdKKjX0CFjzdHvUsf2T5e9gWvrAUeFkk8mts6gRVvg5xhkkDvDN_Q9OqOZa0wPbvdiyOBAKjCoDQ";
@@ -391,6 +394,8 @@ public class MainActivity extends AppCompatActivity {
                 return R.layout.screen_player;
             case SCREEN_SETTINGS:
                 return R.layout.screen_settings;
+            case SCREEN_PREFERENCES:
+                return R.layout.screen_preferences;
             case SCREEN_SPLASH:
             default:
                 return R.layout.screen_splash;
@@ -408,9 +413,9 @@ public class MainActivity extends AppCompatActivity {
             topBrand.setOnClickListener(view -> showScreen(SCREEN_HOME));
         }
 
-        ImageButton signalButton = content.findViewById(R.id.signalButton);
-        if (signalButton != null) {
-            signalButton.setOnClickListener(view -> showScreen(SCREEN_LIVE));
+        ImageButton settingsButton = content.findViewById(R.id.settingsButton);
+        if (settingsButton != null) {
+            settingsButton.setOnClickListener(view -> showScreen(SCREEN_PREFERENCES));
         }
 
         View getStartedButton = content.findViewById(R.id.getStartedButton);
@@ -440,6 +445,11 @@ public class MainActivity extends AppCompatActivity {
         if (bleConnectButton != null) {
             bleConnectButton.setOnClickListener(view -> connectLiveBleWatch());
         }
+        
+        View wellnessConnectButton = content.findViewById(R.id.wellnessConnectButton);
+        if (wellnessConnectButton != null) {
+            wellnessConnectButton.setOnClickListener(view -> connectLiveBleWatch());
+        }
 
         ImageView onboardingImage = content.findViewById(R.id.onboardingDeviceImage);
         if (onboardingImage != null) {
@@ -449,38 +459,171 @@ public class MainActivity extends AppCompatActivity {
 
         if (SCREEN_PLAYER.equals(screen)) {
             configurePlayerScreen(content);
+        } else if (SCREEN_PREFERENCES.equals(screen)) {
+            configurePreferencesScreen(content);
         } else if (SCREEN_SETTINGS.equals(screen)) {
-            configureSettingsScreen(content);
+            configureWellnessScreen(content);
         }
 
         applyHealthSnapshot(content);
         applyBleStatus(content);
     }
 
-    private void configureSettingsScreen(View content) {
+    private void setupChipGroup(ChipGroup group, EditText otherEdit, String prefValue) {
+        if (group == null) return;
+        List<String> prefItems = Arrays.asList(prefValue.split(","));
+        List<String> customItems = new ArrayList<>();
+        
+        for (int i = 0; i < group.getChildCount(); i++) {
+            View child = group.getChildAt(i);
+            if (child instanceof Chip) {
+                Chip chip = (Chip) child;
+                String text = chip.getText().toString();
+                if ("Other".equalsIgnoreCase(text)) {
+                    chip.setOnCheckedChangeListener((btn, isChecked) -> {
+                        if (otherEdit != null) otherEdit.setVisibility(isChecked ? View.VISIBLE : View.GONE);
+                    });
+                } else {
+                    boolean hasPref = false;
+                    for (String pref : prefItems) {
+                        if (pref.trim().equalsIgnoreCase(text)) {
+                            hasPref = true;
+                            break;
+                        }
+                    }
+                    chip.setChecked(hasPref);
+                }
+            }
+        }
+        
+        for (String pref : prefItems) {
+            String p = pref.trim();
+            if (p.isEmpty()) continue;
+            boolean matched = false;
+            for (int i = 0; i < group.getChildCount(); i++) {
+                View child = group.getChildAt(i);
+                if (child instanceof Chip) {
+                    Chip chip = (Chip) child;
+                    if (p.equalsIgnoreCase(chip.getText().toString()) && !"Other".equalsIgnoreCase(chip.getText().toString())) {
+                        matched = true;
+                        break;
+                    }
+                }
+            }
+            if (!matched) {
+                customItems.add(p);
+            }
+        }
+        
+        if (!customItems.isEmpty() && otherEdit != null) {
+            otherEdit.setText(android.text.TextUtils.join(", ", customItems));
+            for (int i = 0; i < group.getChildCount(); i++) {
+                View child = group.getChildAt(i);
+                if (child instanceof Chip && "Other".equalsIgnoreCase(((Chip) child).getText().toString())) {
+                    ((Chip) child).setChecked(true);
+                }
+            }
+        }
+    }
+
+    private String getSelectedChips(ChipGroup group, EditText otherEdit) {
+        if (group == null) return "";
+        List<String> selected = new ArrayList<>();
+        boolean otherChecked = false;
+        
+        for (int i = 0; i < group.getChildCount(); i++) {
+            View child = group.getChildAt(i);
+            if (child instanceof Chip) {
+                Chip chip = (Chip) child;
+                if (chip.isChecked()) {
+                    if ("Other".equalsIgnoreCase(chip.getText().toString())) {
+                        otherChecked = true;
+                    } else {
+                        selected.add(chip.getText().toString());
+                    }
+                }
+            }
+        }
+        
+        if (otherChecked && otherEdit != null) {
+            String otherText = otherEdit.getText().toString().trim();
+            if (!otherText.isEmpty()) {
+                selected.add(otherText);
+            }
+        }
+        
+        return android.text.TextUtils.join(", ", selected);
+    }
+
+    private void configurePreferencesScreen(View content) {
         SharedPreferences prefs = getSharedPreferences("MusicZPrefs", MODE_PRIVATE);
         
-        EditText editLanguage = content.findViewById(R.id.editLanguage);
-        EditText editGenres = content.findViewById(R.id.editGenres);
-        EditText editArtists = content.findViewById(R.id.editArtists);
-        EditText editMusicType = content.findViewById(R.id.editMusicType);
+        ChipGroup groupLang = content.findViewById(R.id.chipGroupLanguage);
+        EditText editLang = content.findViewById(R.id.editLanguage);
+        setupChipGroup(groupLang, editLang, prefs.getString("prefLanguage", "English"));
         
-        if (editLanguage != null) editLanguage.setText(prefs.getString("prefLanguage", "English"));
-        if (editGenres != null) editGenres.setText(prefs.getString("prefGenres", "Pop, Lo-Fi"));
-        if (editArtists != null) editArtists.setText(prefs.getString("prefArtists", "The Weeknd"));
-        if (editMusicType != null) editMusicType.setText(prefs.getString("prefMusicType", "Vocal"));
+        ChipGroup groupGenres = content.findViewById(R.id.chipGroupGenres);
+        EditText editGenres = content.findViewById(R.id.editGenres);
+        setupChipGroup(groupGenres, editGenres, prefs.getString("prefGenres", "Pop"));
+
+        EditText editArtists = content.findViewById(R.id.editArtists);
+        if (editArtists != null) editArtists.setText(prefs.getString("prefArtists", ""));
+
+        ChipGroup groupMusicType = content.findViewById(R.id.chipGroupMusicType);
+        EditText editMusicType = content.findViewById(R.id.editMusicType);
+        setupChipGroup(groupMusicType, editMusicType, prefs.getString("prefMusicType", "Vocal"));
 
         View saveBtn = content.findViewById(R.id.saveSettingsButton);
         if (saveBtn != null) {
             saveBtn.setOnClickListener(v -> {
                 SharedPreferences.Editor editor = prefs.edit();
-                if (editLanguage != null) editor.putString("prefLanguage", editLanguage.getText().toString());
-                if (editGenres != null) editor.putString("prefGenres", editGenres.getText().toString());
+                editor.putString("prefLanguage", getSelectedChips(groupLang, editLang));
+                editor.putString("prefGenres", getSelectedChips(groupGenres, editGenres));
                 if (editArtists != null) editor.putString("prefArtists", editArtists.getText().toString());
-                if (editMusicType != null) editor.putString("prefMusicType", editMusicType.getText().toString());
+                editor.putString("prefMusicType", getSelectedChips(groupMusicType, editMusicType));
                 editor.apply();
                 Toast.makeText(MainActivity.this, "Preferences Saved!", Toast.LENGTH_SHORT).show();
             });
+        }
+    }
+
+    private void configureWellnessScreen(View content) {
+        TextView scoreText = content.findViewById(R.id.stabilityScoreText);
+        TextView statusText = content.findViewById(R.id.stabilityStatusText);
+        TextView zoneText = content.findViewById(R.id.stabilityZoneText);
+
+        long bpm = parseLongSafe(latestHealthSnapshot.bpmText);
+        
+        if (bpm > 0) {
+            // Very simple mock logic to simulate an emotional stability score based on BPM
+            // 60-80 BPM is ideal (high score), higher/lower drops the score
+            long diffFromIdeal = Math.abs(bpm - 70);
+            long score = Math.max(10, 100 - diffFromIdeal);
+            
+            if (scoreText != null) scoreText.setText(String.valueOf(score));
+            
+            if (statusText != null && zoneText != null) {
+                if (score >= 80) {
+                    statusText.setText("Stable");
+                    zoneText.setText("Optimal Zone");
+                    statusText.setTextColor(android.graphics.Color.WHITE);
+                } else if (score >= 60) {
+                    statusText.setText("Elevated");
+                    zoneText.setText("Warning Zone");
+                    statusText.setTextColor(android.graphics.Color.parseColor("#ffafd3"));
+                } else {
+                    statusText.setText("Stressed");
+                    zoneText.setText("Critical Zone");
+                    statusText.setTextColor(android.graphics.Color.parseColor("#ffb4ab"));
+                }
+            }
+        } else {
+            if (scoreText != null) scoreText.setText("--");
+            if (statusText != null) {
+                statusText.setText("Unknown");
+                statusText.setTextColor(android.graphics.Color.parseColor("#849495"));
+            }
+            if (zoneText != null) zoneText.setText("Sync watch to calculate.");
         }
     }
 
@@ -504,7 +647,7 @@ public class MainActivity extends AppCompatActivity {
         String prefGenres = prefs.getString("prefGenres", "").trim();
         
         if (prefLanguage.isEmpty() && prefGenres.isEmpty()) {
-            if (subtitle != null) subtitle.setText("Please set your preferences in Settings first.");
+            if (subtitle != null) subtitle.setText("Please set your preferences in Wellness first.");
             return;
         }
 
@@ -517,23 +660,23 @@ public class MainActivity extends AppCompatActivity {
         }
 
         String stressLevel = "Balanced";
-        String moodQuery = "focus";
+        String moodQuery = "pop";
         
         if (bpm > 100 && steps > 1000) {
             stressLevel = "Energetic";
-            moodQuery = "workout energy";
+            moodQuery = "upbeat energy";
         } else if (bpm > 100) {
             stressLevel = "High Stress";
-            moodQuery = "relaxation meditation calm";
+            moodQuery = "relaxing chill";
         } else if (bpm < 60) {
             stressLevel = "Deeply Relaxed";
-            moodQuery = "sleep ambient";
+            moodQuery = "acoustic soft";
         }
 
         String finalStressLevel = stressLevel;
         if (subtitle != null) subtitle.setText("Curating " + finalStressLevel + " recommendations...");
         
-        String searchQuery = moodQuery + " " + prefGenres + " " + prefLanguage;
+        String searchQuery = moodQuery + " " + prefGenres + " " + prefLanguage + " " + prefs.getString("prefMusicType", "");
         fetchItunesSongs(searchQuery, finalStressLevel, prefGenres, prefLanguage);
     }
     

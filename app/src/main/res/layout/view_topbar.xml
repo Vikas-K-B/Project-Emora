@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/topbar"
+    android:layout_width="match_parent"
+    android:layout_height="86dp"
+    android:background="@drawable/topbar_bg"
+    android:gravity="center_vertical"
+    android:orientation="horizontal"
+    android:paddingStart="24dp"
+    android:paddingEnd="24dp">
+
+    <ImageView
+        android:id="@+id/topAvatar"
+        android:layout_width="50dp"
+        android:layout_height="50dp"
+        android:background="@drawable/avatar_ring"
+        android:contentDescription="@string/profile_image"
+        android:padding="3dp"
+        android:scaleType="centerCrop" />
+
+    <TextView
+        android:id="@+id/topBrand"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="14dp"
+        android:layout_weight="1"
+        android:fontFamily="sans-serif-medium"
+        android:text="@string/brand_short"
+        android:textColor="@color/mood_cyan"
+        android:textSize="21sp"
+        android:textStyle="bold" />
+
+    <ImageButton
+        android:id="@+id/signalButton"
+        android:layout_width="46dp"
+        android:layout_height="46dp"
+        android:background="@drawable/circle_cyan"
+        android:contentDescription="@string/live_mood"
+        android:padding="11dp"
+        android:src="@drawable/ic_sensors" />
+</LinearLayout>

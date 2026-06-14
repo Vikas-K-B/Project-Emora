@@ -6,4 +6,11 @@
     </style>
 
     <style name="Theme.Genzmusicapp" parent="Base.Theme.Genzmusicapp" />
+
+    <style name="CustomChipStyle" parent="Widget.MaterialComponents.Chip.Filter">
+        <item name="chipBackgroundColor">@color/chip_bg_color</item>
+        <item name="android:textColor">@color/chip_text_color</item>
+        <item name="chipStrokeWidth">1dp</item>
+        <item name="chipStrokeColor">#3a494a</item>
+    </style>
 </resources>

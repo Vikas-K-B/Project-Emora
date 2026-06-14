@@ -97,6 +97,7 @@ public class MainActivity extends AppCompatActivity {
     private static final String SCREEN_PLAYER = "player";
     private static final String SCREEN_SETTINGS = "settings";
     private static final String SCREEN_PREFERENCES = "preferences";
+    private static final String SCREEN_PROFILE = "profile";
 
     private static final String DEVICE_IMAGE_URL =
             "https://lh3.googleusercontent.com/aida-public/AB6AXuCwprrlfC4teTJ4gg_c0-xg_Ff94DbAN7TBpUFuDMPAeILcbS_2n4xN-e2PNM2hjeEba6SO9Fuv-CsOQ5dG2V034xMWo_3hUEbo75Ui-6Lc53Q2PF8hlj72yG6L89d6u_wHU-T6-piKm_IPGhKvp5gjUquChSZhNKjxSijVhmdmk__GPkuSWZdtvE2TXhlC4iaFdKKjX0CFjzdHvUsf2T5e9gWvrAUeFkk8mts6gRVvg5xhkkDvDN_Q9OqOZa0wPbvdiyOBAKjCoDQ";
@@ -396,6 +397,8 @@ public class MainActivity extends AppCompatActivity {
                 return R.layout.screen_settings;
             case SCREEN_PREFERENCES:
                 return R.layout.screen_preferences;
+            case SCREEN_PROFILE:
+                return R.layout.screen_profile;
             case SCREEN_SPLASH:
             default:
                 return R.layout.screen_splash;
@@ -406,6 +409,7 @@ public class MainActivity extends AppCompatActivity {
         ImageView topAvatar = content.findViewById(R.id.topAvatar);
         if (topAvatar != null) {
             loadImage(avatarForScreen(screen), topAvatar);
+            topAvatar.setOnClickListener(v -> showScreen(SCREEN_PROFILE));
         }
 
         TextView topBrand = content.findViewById(R.id.topBrand);
@@ -463,6 +467,8 @@ public class MainActivity extends AppCompatActivity {
             configurePreferencesScreen(content);
         } else if (SCREEN_SETTINGS.equals(screen)) {
             configureWellnessScreen(content);
+        } else if (SCREEN_PROFILE.equals(screen)) {
+            configureProfileScreen(content);
         }
 
         applyHealthSnapshot(content);
@@ -556,6 +562,11 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void configurePreferencesScreen(View content) {
+        View backBtn = content.findViewById(R.id.backToWellnessButton);
+        if (backBtn != null) {
+            backBtn.setOnClickListener(v -> showScreen(SCREEN_SETTINGS));
+        }
+
         SharedPreferences prefs = getSharedPreferences("MusicZPrefs", MODE_PRIVATE);
         
         ChipGroup groupLang = content.findViewById(R.id.chipGroupLanguage);
@@ -571,7 +582,7 @@ public class MainActivity extends AppCompatActivity {
 
         ChipGroup groupMusicType = content.findViewById(R.id.chipGroupMusicType);
         EditText editMusicType = content.findViewById(R.id.editMusicType);
-        setupChipGroup(groupMusicType, editMusicType, prefs.getString("prefMusicType", "Vocal"));
+        setupChipGroup(groupMusicType, editMusicType, prefs.getString("prefMusicType", "Relaxation"));
 
         View saveBtn = content.findViewById(R.id.saveSettingsButton);
         if (saveBtn != null) {
@@ -587,12 +598,38 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
+    private void configureProfileScreen(View content) {
+        View backBtn = content.findViewById(R.id.backFromProfileBtn);
+        if (backBtn != null) {
+            backBtn.setOnClickListener(v -> showScreen(SCREEN_HOME));
+        }
+        
+        SharedPreferences prefs = getSharedPreferences("MusicZPrefs", MODE_PRIVATE);
+        setTextIfPresent(content, R.id.profileWatch, selectedBleDeviceLabel);
+        
+        int totalSessions = prefs.getInt("totalSyncSessions", 1);
+        setTextIfPresent(content, R.id.profileSessions, String.valueOf(totalSessions));
+        
+        setTextIfPresent(content, R.id.profileAvgWellness, latestHealthSnapshot.wellnessScoreText);
+        
+        String lang = prefs.getString("prefLanguage", "English");
+        String genre = prefs.getString("prefGenres", "Pop");
+        setTextIfPresent(content, R.id.profileLanguage, lang.isEmpty() ? "None" : lang);
+        setTextIfPresent(content, R.id.profileGenre, genre.isEmpty() ? "None" : genre);
+    }
     private void configureWellnessScreen(View content) {
         TextView scoreText = content.findViewById(R.id.stabilityScoreText);
         TextView statusText = content.findViewById(R.id.stabilityStatusText);
         TextView zoneText = content.findViewById(R.id.stabilityZoneText);
 
         long bpm = parseLongSafe(latestHealthSnapshot.bpmText);
+        long steps = parseLongSafe(latestHealthSnapshot.stepsText);
+        
+        setTextIfPresent(content, R.id.wellnessBpmText, latestHealthSnapshot.bpmText);
+        setTextIfPresent(content, R.id.wellnessStepsText, formatNumber(steps));
+        
+        java.text.SimpleDateFormat timeFormat = new java.text.SimpleDateFormat("h:mm a", Locale.US);
+        setTextIfPresent(content, R.id.wellnessSyncText, "Today, " + timeFormat.format(new java.util.Date()));
         
         if (bpm > 0) {
             // Very simple mock logic to simulate an emotional stability score based on BPM
@@ -624,6 +661,81 @@ public class MainActivity extends AppCompatActivity {
                 statusText.setTextColor(android.graphics.Color.parseColor("#849495"));
             }
             if (zoneText != null) zoneText.setText("Sync watch to calculate.");
+        }
+        
+        // Dynamic Timeline Rendering
+        LinearLayout container = content.findViewById(R.id.timelineContainer);
+        LinearLayout labels = content.findViewById(R.id.timelineLabels);
+        if (container != null && labels != null) {
+            container.removeAllViews();
+            labels.removeAllViews();
+            
+            SharedPreferences prefs = getSharedPreferences("MusicZPrefs", MODE_PRIVATE);
+            String historyJson = prefs.getString("weeklyHistory", "{}");
+            
+            java.util.Calendar cal = java.util.Calendar.getInstance();
+            java.text.SimpleDateFormat sdf = new java.text.SimpleDateFormat("yyyy-MM-dd", Locale.US);
+            java.text.SimpleDateFormat dayFormat = new java.text.SimpleDateFormat("EEE", Locale.US);
+            
+            // Save today's latest data
+            try {
+                org.json.JSONObject history = new org.json.JSONObject(historyJson);
+                String todayKey = sdf.format(cal.getTime());
+                if (bpm > 0 && scoreText != null && !scoreText.getText().toString().equals("--")) {
+                    org.json.JSONObject todayData = new org.json.JSONObject();
+                    todayData.put("score", Integer.parseInt(scoreText.getText().toString()));
+                    history.put(todayKey, todayData);
+                    prefs.edit().putString("weeklyHistory", history.toString()).apply();
+                }
+                
+                // Render last 7 days
+                for (int i = 6; i >= 0; i--) {
+                    java.util.Calendar dayCal = java.util.Calendar.getInstance();
+                    dayCal.add(java.util.Calendar.DAY_OF_YEAR, -i);
+                    String dateKey = sdf.format(dayCal.getTime());
+                    String dayName = dayFormat.format(dayCal.getTime());
+                    boolean isToday = i == 0;
+                    
+                    int dayScore = 0;
+                    if (history.has(dateKey)) {
+                        dayScore = history.getJSONObject(dateKey).optInt("score", 0);
+                    }
+                    
+                    // Bar
+                    View bar = new View(this);
+                    LinearLayout.LayoutParams barParams = new LinearLayout.LayoutParams(
+                            dp(24),
+                            dayScore > 0 ? dp(dayScore) : dp(2)
+                    );
+                    barParams.weight = 0;
+                    barParams.leftMargin = dp(8);
+                    barParams.rightMargin = dp(8);
+                    bar.setLayoutParams(barParams);
+                    bar.setBackgroundColor(isToday ? android.graphics.Color.parseColor("#00dce5") 
+                            : (dayScore > 0 ? android.graphics.Color.parseColor("#3a494a") : android.graphics.Color.parseColor("#171f33")));
+                    
+                    LinearLayout barWrapper = new LinearLayout(this);
+                    LinearLayout.LayoutParams wrapperParams = new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f);
+                    barWrapper.setLayoutParams(wrapperParams);
+                    barWrapper.setGravity(android.view.Gravity.BOTTOM | android.view.Gravity.CENTER_HORIZONTAL);
+                    barWrapper.addView(bar);
+                    container.addView(barWrapper);
+                    
+                    // Label
+                    TextView label = new TextView(this);
+                    LinearLayout.LayoutParams labelParams = new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
+                    label.setLayoutParams(labelParams);
+                    label.setGravity(android.view.Gravity.CENTER);
+                    label.setText(dayName);
+                    label.setTextSize(12f);
+                    label.setTextColor(isToday ? android.graphics.Color.WHITE : android.graphics.Color.parseColor("#849495"));
+                    if (isToday) label.setTypeface(null, android.graphics.Typeface.BOLD);
+                    labels.addView(label);
+                }
+                
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
         }
     }
 
@@ -673,14 +785,20 @@ public class MainActivity extends AppCompatActivity {
             moodQuery = "acoustic soft";
         }
 
+        String prefArtists = prefs.getString("prefArtists", "").trim();
+        String prefType = prefs.getString("prefMusicType", "").trim();
+
         String finalStressLevel = stressLevel;
         if (subtitle != null) subtitle.setText("Curating " + finalStressLevel + " recommendations...");
         
-        String searchQuery = moodQuery + " " + prefGenres + " " + prefLanguage + " " + prefs.getString("prefMusicType", "");
-        fetchItunesSongs(searchQuery, finalStressLevel, prefGenres, prefLanguage);
+        // Use a broader query for iTunes to ensure we get results (iTunes 'term' acts as strict AND)
+        String firstGenre = prefGenres.contains(",") ? prefGenres.split(",")[0] : prefGenres;
+        String searchQuery = firstGenre.isEmpty() ? moodQuery : moodQuery + " " + firstGenre;
+        
+        fetchItunesSongs(searchQuery, finalStressLevel, prefGenres, prefLanguage, prefArtists, prefType);
     }
     
-    private void fetchItunesSongs(String query, String stressLevel, String genre, String language) {
+    private void fetchItunesSongs(String moodQuery, String stressLevel, String prefGenres, String prefLanguage, String prefArtists, String prefType) {
         ProgressBar loading = currentContent.findViewById(R.id.recommendationLoading);
         if (loading != null) loading.setVisibility(View.VISIBLE);
         LinearLayout container = currentContent.findViewById(R.id.playerPlaylistContainer);
@@ -688,28 +806,100 @@ public class MainActivity extends AppCompatActivity {
         
         imageExecutor.execute(() -> {
             try {
-                String encodedQuery = java.net.URLEncoder.encode(query, "UTF-8");
-                URL url = new URL("https://itunes.apple.com/search?term=" + encodedQuery + "&entity=song&limit=40");
-                HttpURLConnection conn = (HttpURLConnection) url.openConnection();
-                conn.setRequestMethod("GET");
-                BufferedReader in = new BufferedReader(new InputStreamReader(conn.getInputStream()));
-                StringBuilder response = new StringBuilder();
-                String line;
-                while ((line = in.readLine()) != null) response.append(line);
-                in.close();
-
-                org.json.JSONObject jsonResponse = new org.json.JSONObject(response.toString());
-                org.json.JSONArray results = jsonResponse.getJSONArray("results");
+                String firstLang = prefLanguage.contains(",") ? prefLanguage.split(",")[0].trim() : prefLanguage.trim();
+                String firstGenre = prefGenres.contains(",") ? prefGenres.split(",")[0].trim() : prefGenres.trim();
+                String firstArtist = prefArtists.contains(",") ? prefArtists.split(",")[0].trim() : prefArtists.trim();
                 
-                List<org.json.JSONObject> songList = new ArrayList<>();
-                for (int i = 0; i < results.length(); i++) {
-                    songList.add(results.getJSONObject(i));
+                // Construct fallback query tiers
+                List<String> queryTiers = new ArrayList<>();
+                
+                if (!firstArtist.isEmpty()) {
+                    // Artist specified - we MUST prioritize pulling this artist's songs
+                    queryTiers.add((firstLang + " " + firstArtist + " " + firstGenre + " " + moodQuery).trim());
+                    queryTiers.add((firstLang + " " + firstArtist + " " + firstGenre).trim());
+                    queryTiers.add((firstArtist + " " + firstGenre).trim());
+                    queryTiers.add((firstLang + " " + firstArtist).trim());
+                    queryTiers.add(firstArtist);
+                } else {
+                    // No artist specified
+                    queryTiers.add((firstLang + " " + firstGenre + " " + moodQuery).trim());
+                    if (!firstGenre.isEmpty()) queryTiers.add((firstLang + " " + firstGenre).trim());
+                    if (!firstLang.isEmpty()) queryTiers.add((firstLang + " " + moodQuery).trim());
+                    if (!firstLang.isEmpty()) queryTiers.add(firstLang);
+                    
+                    if (firstLang.isEmpty()) {
+                        queryTiers.add((firstGenre + " " + moodQuery).trim());
+                        queryTiers.add(firstGenre);
+                        queryTiers.add("music");
+                    }
                 }
-                java.util.Collections.shuffle(songList);
-                int count = Math.min(20, songList.size());
-                List<org.json.JSONObject> finalSongs = new ArrayList<>(songList.subList(0, count));
+                
+                List<org.json.JSONObject> allSongs = new ArrayList<>();
+                for (String q : queryTiers) {
+                    if (q.trim().isEmpty()) continue;
+                    
+                    String encodedQuery = java.net.URLEncoder.encode(q, "UTF-8");
+                    URL url = new URL("https://itunes.apple.com/search?term=" + encodedQuery + "&entity=song&limit=100");
+                    HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+                    conn.setRequestMethod("GET");
+                    BufferedReader in = new BufferedReader(new InputStreamReader(conn.getInputStream()));
+                    StringBuilder response = new StringBuilder();
+                    String line;
+                    while ((line = in.readLine()) != null) response.append(line);
+                    in.close();
 
-                handler.post(() -> renderRecommendations(finalSongs, stressLevel, genre, language));
+                    org.json.JSONObject jsonResponse = new org.json.JSONObject(response.toString());
+                    org.json.JSONArray results = jsonResponse.getJSONArray("results");
+                    
+                    for (int i = 0; i < results.length(); i++) {
+                        allSongs.add(results.getJSONObject(i));
+                    }
+                    
+                    if (allSongs.size() >= 20) {
+                        break; // Stop querying once we have a decent pool of matches
+                    }
+                }
+                
+                List<org.json.JSONObject> filteredSongs = new ArrayList<>();
+                List<String> userGenres = Arrays.asList(prefGenres.toLowerCase().split(","));
+                List<String> userArtists = Arrays.asList(prefArtists.toLowerCase().split(","));
+
+                // Level 0: Strict Match (Artist AND Genre)
+                for (org.json.JSONObject song : allSongs) {
+                    String trackArtist = song.optString("artistName", "").toLowerCase();
+                    String trackGenre = song.optString("primaryGenreName", "").toLowerCase();
+                    
+                    boolean artistMatch = prefArtists.isEmpty() || userArtists.stream().anyMatch(trackArtist::contains);
+                    boolean genreMatch = prefGenres.isEmpty() || userGenres.stream().anyMatch(trackGenre::contains);
+                    
+                    if (artistMatch && genreMatch) {
+                        if (!filteredSongs.contains(song)) filteredSongs.add(song);
+                    }
+                }
+
+                // Level 1: If strictly matching both yields < 20, we can relax Genre slightly, 
+                // BUT WE NEVER RELAX ARTIST. Artist must always match!
+                if (filteredSongs.size() < 20) {
+                    for (org.json.JSONObject song : allSongs) {
+                        if (!filteredSongs.contains(song)) {
+                            String trackArtist = song.optString("artistName", "").toLowerCase();
+                            boolean artistMatch = prefArtists.isEmpty() || userArtists.stream().anyMatch(trackArtist::contains);
+                            
+                            // If artist matches, we accept it regardless of genre mismatch
+                            if (artistMatch) {
+                                filteredSongs.add(song);
+                            }
+                        }
+                    }
+                }
+
+                // Dedup and shuffle
+                java.util.Collections.shuffle(filteredSongs);
+                int count = Math.min(20, filteredSongs.size());
+                
+                List<org.json.JSONObject> finalSongs = count > 0 ? new ArrayList<>(filteredSongs.subList(0, count)) : new ArrayList<>();
+
+                handler.post(() -> renderRecommendations(finalSongs, stressLevel, prefGenres, prefLanguage, prefArtists));
             } catch (Exception e) {
                 e.printStackTrace();
                 handler.post(() -> {
@@ -720,7 +910,9 @@ public class MainActivity extends AppCompatActivity {
         });
     }
 
-    private void renderRecommendations(List<org.json.JSONObject> songs, String stressLevel, String genrePref, String langPref) {
+
+
+    private void renderRecommendations(List<org.json.JSONObject> songs, String stressLevel, String genrePref, String langPref, String artistPref) {
         if (currentContent == null || !SCREEN_PLAYER.equals(currentScreen)) return;
         
         ProgressBar loading = currentContent.findViewById(R.id.recommendationLoading);
@@ -748,7 +940,7 @@ public class MainActivity extends AppCompatActivity {
                 setTextIfPresent(itemView, R.id.itemGenre, genre);
                 setTextIfPresent(itemView, R.id.itemLanguage, langPref.isEmpty() ? "Global" : langPref);
                 
-                String reason = "Recommended because your current stress level is " + stressLevel.toLowerCase() + " and this matches your preferences.";
+                String reason = "Recommended because your stress level is " + stressLevel.toLowerCase() + " and it matches your preferred " + (!langPref.isEmpty() ? langPref + " " : "") + (!genrePref.isEmpty() ? genrePref : "music") + ".";
                 setTextIfPresent(itemView, R.id.itemReason, reason);
 
                 ImageView albumArt = itemView.findViewById(R.id.itemAlbumArt);
@@ -1171,19 +1363,29 @@ public class MainActivity extends AppCompatActivity {
         }
 
         int packetType = value[1] & 0xFF;
+        
+        // Debug logging for verified packets
+        StringBuilder hexString = new StringBuilder();
+        for (byte b : value) {
+            hexString.append(String.format("%02X ", b));
+        }
+        android.util.Log.d("MoodSyncBLE", "Decoded Custom Packet [Type: " + String.format("%02X", packetType) + "]: " + hexString.toString().trim());
+
         if (packetType == 0x5C && value.length >= 5) {
             int bpm = value[4] & 0xFF;
             updateLiveBpm(bpm);
             return;
         }
 
-        if (packetType == 0x51 || value.length >= 8) {
+        if (packetType == 0x51 && value.length >= 8) {
             Long steps = extractCustomStepCount(value);
             if (steps != null) {
                 updateLiveSteps(steps, packetType);
-            } else if (packetType == 0x51) {
-                updateBleStatus("Step packet received, but step bytes could not be decoded.");
+            } else {
+                updateBleStatus("Step packet received, but step bytes could not be decoded. Ignoring to prevent random jumps.");
             }
+        } else if (packetType != 0x5C && packetType != 0x51) {
+            android.util.Log.w("MoodSyncBLE", "Ignored unrecognized packet type: " + String.format("%02X", packetType));
         }
     }
 
@@ -1216,6 +1418,9 @@ public class MainActivity extends AppCompatActivity {
 
     private Long extractCustomStepCount(byte[] value) {
         long currentSteps = parseLongSafe(latestHealthSnapshot.stepsText);
+        
+        // Strict parsing requirement: Do not estimate or search.
+        // We strictly expect steps to be at offset 4 in a 0x51 packet as a little endian Int.
         if (value.length >= 8) {
             long directSteps = unsignedLittleEndianInt(value, 4);
             if (isPlausibleStepCount(directSteps, currentSteps)) {
@@ -1223,27 +1428,7 @@ public class MainActivity extends AppCompatActivity {
             }
         }
 
-        if (value.length >= 6) {
-            int shortSteps = unsignedLittleEndianShort(value, 4);
-            if (isPlausibleStepCount(shortSteps, currentSteps)) {
-                return (long) shortSteps;
-            }
-        }
-
-        for (int offset = 2; offset <= value.length - 4; offset++) {
-            long candidate = unsignedLittleEndianInt(value, offset);
-            if (isPlausibleStepCount(candidate, currentSteps)) {
-                return candidate;
-            }
-        }
-
-        for (int offset = 2; offset <= value.length - 2; offset++) {
-            int candidate = unsignedLittleEndianShort(value, offset);
-            if (isPlausibleStepCount(candidate, currentSteps)) {
-                return (long) candidate;
-            }
-        }
-
+        // Do not search other offsets. This prevents random bytes from triggering step jumps.
         return null;
     }
 

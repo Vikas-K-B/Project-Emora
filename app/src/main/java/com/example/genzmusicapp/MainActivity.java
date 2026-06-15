@@ -50,6 +50,7 @@ import androidx.core.content.ContextCompat;
 import androidx.core.graphics.Insets;
 import androidx.core.view.ViewCompat;
 import androidx.core.view.WindowInsetsCompat;
+import androidx.core.app.ActivityCompat;
 import androidx.health.connect.client.HealthConnectClient;
 import androidx.health.connect.client.PermissionController;
 import androidx.health.connect.client.permission.HealthPermission;
@@ -130,6 +131,9 @@ public class MainActivity extends AppCompatActivity {
 
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final ExecutorService imageExecutor = Executors.newFixedThreadPool(3);
+
+    private BiometricClassifier biometricClassifier;
+
     private final Map<String, Bitmap> imageCache = new HashMap<>();
 
     private FrameLayout screenContainer;
@@ -311,6 +315,8 @@ public class MainActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
         EdgeToEdge.enable(this);
         setContentView(R.layout.activity_main);
+        
+        biometricClassifier = new BiometricClassifier(this);
 
         ViewCompat.setOnApplyWindowInsetsListener(findViewById(R.id.main), (view, insets) -> {
             Insets systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars());
@@ -340,8 +346,17 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onDestroy() {
         super.onDestroy();
+        if (biometricClassifier != null) {
+            biometricClassifier.close();
+        }
+        if (watchGatt != null) {
+            if (ActivityCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED) {
+                watchGatt.disconnect();
+                watchGatt.close();
+            }
+            watchGatt = null;
+        }
         stopBleScan();
-        closeWatchGatt();
         imageExecutor.shutdownNow();
     }
 
@@ -632,26 +647,26 @@ public class MainActivity extends AppCompatActivity {
         setTextIfPresent(content, R.id.wellnessSyncText, "Today, " + timeFormat.format(new java.util.Date()));
         
         if (bpm > 0) {
-            // Very simple mock logic to simulate an emotional stability score based on BPM
-            // 60-80 BPM is ideal (high score), higher/lower drops the score
-            long diffFromIdeal = Math.abs(bpm - 70);
-            long score = Math.max(10, 100 - diffFromIdeal);
+            long score = calculateWellnessScore(bpm, steps);
             
             if (scoreText != null) scoreText.setText(String.valueOf(score));
             
             if (statusText != null && zoneText != null) {
-                if (score >= 80) {
-                    statusText.setText("Stable");
-                    zoneText.setText("Optimal Zone");
-                    statusText.setTextColor(android.graphics.Color.WHITE);
-                } else if (score >= 60) {
-                    statusText.setText("Elevated");
-                    zoneText.setText("Warning Zone");
-                    statusText.setTextColor(android.graphics.Color.parseColor("#ffafd3"));
+                if (biometricClassifier != null) {
+                    BiometricClassifier.MoodPrediction prediction = biometricClassifier.predictMood(bpm, steps);
+                    statusText.setText(prediction.mood);
+                    zoneText.setText("Confidence: " + prediction.confidencePercent + "%");
+                    
+                    if (prediction.mood.equals("Stressed")) {
+                        statusText.setTextColor(android.graphics.Color.parseColor("#ffb4ab"));
+                    } else if (prediction.mood.equals("Energetic")) {
+                        statusText.setTextColor(android.graphics.Color.parseColor("#ffafd3"));
+                    } else {
+                        statusText.setTextColor(android.graphics.Color.WHITE);
+                    }
                 } else {
-                    statusText.setText("Stressed");
-                    zoneText.setText("Critical Zone");
-                    statusText.setTextColor(android.graphics.Color.parseColor("#ffb4ab"));
+                    statusText.setText("Unknown");
+                    zoneText.setText("Awaiting Model");
                 }
             }
         } else {
@@ -771,19 +786,12 @@ public class MainActivity extends AppCompatActivity {
             return;
         }
 
-        String stressLevel = "Balanced";
+        BiometricClassifier.MoodPrediction prediction = biometricClassifier.predictMood(bpm, steps);
+        String stressLevel = prediction.mood;
         String moodQuery = "pop";
-        
-        if (bpm > 100 && steps > 1000) {
-            stressLevel = "Energetic";
-            moodQuery = "upbeat energy";
-        } else if (bpm > 100) {
-            stressLevel = "High Stress";
-            moodQuery = "relaxing chill";
-        } else if (bpm < 60) {
-            stressLevel = "Deeply Relaxed";
-            moodQuery = "acoustic soft";
-        }
+        if (stressLevel.equals("Stressed")) moodQuery = "relaxing chill";
+        else if (stressLevel.equals("Relaxed") || stressLevel.equals("Calm")) moodQuery = "acoustic soft";
+        else if (stressLevel.equals("Energetic")) moodQuery = "upbeat energy";
 
         String prefArtists = prefs.getString("prefArtists", "").trim();
         String prefType = prefs.getString("prefMusicType", "").trim();
@@ -810,67 +818,103 @@ public class MainActivity extends AppCompatActivity {
                 String firstGenre = prefGenres.contains(",") ? prefGenres.split(",")[0].trim() : prefGenres.trim();
                 String firstArtist = prefArtists.contains(",") ? prefArtists.split(",")[0].trim() : prefArtists.trim();
                 
-                // Construct fallback query tiers
-                List<String> queryTiers = new ArrayList<>();
+                // Read learned preferences from History
+                SharedPreferences prefsHistory = getSharedPreferences("MusicZPrefs", MODE_PRIVATE);
+                org.json.JSONObject freqMap = new org.json.JSONObject();
+                try {
+                    freqMap = new org.json.JSONObject(prefsHistory.getString("user_learned_preferences", "{}"));
+                } catch (Exception ignored) {}
                 
-                if (!firstArtist.isEmpty()) {
-                    // Artist specified - we MUST prioritize pulling this artist's songs
-                    queryTiers.add((firstLang + " " + firstArtist + " " + firstGenre + " " + moodQuery).trim());
-                    queryTiers.add((firstLang + " " + firstArtist + " " + firstGenre).trim());
-                    queryTiers.add((firstArtist + " " + firstGenre).trim());
-                    queryTiers.add((firstLang + " " + firstArtist).trim());
-                    queryTiers.add(firstArtist);
-                } else {
-                    // No artist specified
-                    queryTiers.add((firstLang + " " + firstGenre + " " + moodQuery).trim());
-                    if (!firstGenre.isEmpty()) queryTiers.add((firstLang + " " + firstGenre).trim());
-                    if (!firstLang.isEmpty()) queryTiers.add((firstLang + " " + moodQuery).trim());
-                    if (!firstLang.isEmpty()) queryTiers.add(firstLang);
-                    
-                    if (firstLang.isEmpty()) {
-                        queryTiers.add((firstGenre + " " + moodQuery).trim());
-                        queryTiers.add(firstGenre);
-                        queryTiers.add("music");
-                    }
-                }
+                final org.json.JSONObject finalFreqMap = freqMap;
+                java.util.Comparator<String> prefSorter = (a, b) -> Integer.compare(finalFreqMap.optInt(b.trim(), 0), finalFreqMap.optInt(a.trim(), 0));
                 
-                List<org.json.JSONObject> allSongs = new ArrayList<>();
-                for (String q : queryTiers) {
-                    if (q.trim().isEmpty()) continue;
-                    
-                    String encodedQuery = java.net.URLEncoder.encode(q, "UTF-8");
-                    URL url = new URL("https://itunes.apple.com/search?term=" + encodedQuery + "&entity=song&limit=100");
-                    HttpURLConnection conn = (HttpURLConnection) url.openConnection();
-                    conn.setRequestMethod("GET");
-                    BufferedReader in = new BufferedReader(new InputStreamReader(conn.getInputStream()));
-                    StringBuilder response = new StringBuilder();
-                    String line;
-                    while ((line = in.readLine()) != null) response.append(line);
-                    in.close();
+                List<String> userLangs = new ArrayList<>(prefLanguage.isEmpty() ? java.util.Collections.singletonList("") : Arrays.asList(prefLanguage.split(",")));
+                List<String> userArtists = new ArrayList<>(prefArtists.isEmpty() ? java.util.Collections.singletonList("") : Arrays.asList(prefArtists.split(",")));
+                List<String> userGenres = new ArrayList<>(prefGenres.isEmpty() ? java.util.Collections.singletonList("") : Arrays.asList(prefGenres.split(",")));
 
-                    org.json.JSONObject jsonResponse = new org.json.JSONObject(response.toString());
-                    org.json.JSONArray results = jsonResponse.getJSONArray("results");
+                // Sort based on historical clicks (Personalization Layer)
+                java.util.Collections.sort(userLangs, prefSorter);
+                java.util.Collections.sort(userGenres, prefSorter);
+
+                List<org.json.JSONObject> allSongs = new ArrayList<>();
+                
+                for (String artist : userArtists) {
+                    String a = artist.trim();
+                    java.util.Set<String> uniqueQueries = new java.util.LinkedHashSet<>();
                     
-                    for (int i = 0; i < results.length(); i++) {
-                        allSongs.add(results.getJSONObject(i));
+                    for (String lang : userLangs) {
+                        String l = lang.trim();
+                        for (String genre : userGenres) {
+                            String g = genre.trim();
+
+                            if (!a.isEmpty() && !l.isEmpty()) {
+                                uniqueQueries.add((l + " " + a + " " + g + " " + moodQuery).trim());
+                                uniqueQueries.add((l + " " + a + " " + g).trim());
+                                uniqueQueries.add((l + " " + a + " " + moodQuery).trim());
+                                uniqueQueries.add((l + " " + a).trim());
+                            } else if (!a.isEmpty()) {
+                                uniqueQueries.add((a + " " + g + " " + moodQuery).trim());
+                                uniqueQueries.add((a + " " + g).trim());
+                                uniqueQueries.add((a + " " + moodQuery).trim());
+                                uniqueQueries.add(a);
+                            } else if (!l.isEmpty()) {
+                                uniqueQueries.add((l + " " + g + " " + moodQuery).trim());
+                                uniqueQueries.add((l + " " + g).trim());
+                                uniqueQueries.add((l + " " + moodQuery).trim());
+                                uniqueQueries.add(l);
+                            } else {
+                                uniqueQueries.add((g + " " + moodQuery).trim());
+                                uniqueQueries.add(g);
+                            }
+                        }
                     }
                     
-                    if (allSongs.size() >= 20) {
-                        break; // Stop querying once we have a decent pool of matches
+                    if (a.isEmpty() && prefLanguage.trim().isEmpty()) {
+                        uniqueQueries.add("music");
+                    }
+
+                    int songsForThisArtist = 0;
+                    for (String q : uniqueQueries) {
+                        if (q.trim().isEmpty()) continue;
+                        
+                        String encodedQuery = java.net.URLEncoder.encode(q, "UTF-8");
+                        URL url = new URL("https://itunes.apple.com/search?term=" + encodedQuery + "&entity=song&limit=25");
+                        HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+                        conn.setRequestMethod("GET");
+                        BufferedReader in = new BufferedReader(new InputStreamReader(conn.getInputStream()));
+                        StringBuilder response = new StringBuilder();
+                        String line;
+                        while ((line = in.readLine()) != null) response.append(line);
+                        in.close();
+
+                        org.json.JSONObject jsonResponse = new org.json.JSONObject(response.toString());
+                        org.json.JSONArray results = jsonResponse.getJSONArray("results");
+                        
+                        if (results.length() > 0) {
+                            for (int i = 0; i < results.length(); i++) {
+                                allSongs.add(results.getJSONObject(i));
+                            }
+                            songsForThisArtist += results.length();
+                        }
+                        
+                        // We fetched enough songs for this artist, move to the next artist
+                        if (songsForThisArtist >= 15) {
+                            break; 
+                        }
                     }
                 }
                 
                 List<org.json.JSONObject> filteredSongs = new ArrayList<>();
-                List<String> userGenres = Arrays.asList(prefGenres.toLowerCase().split(","));
-                List<String> userArtists = Arrays.asList(prefArtists.toLowerCase().split(","));
+                List<String> finalUserGenres = Arrays.asList(prefGenres.toLowerCase().split(","));
+                List<String> finalUserArtists = Arrays.asList(prefArtists.toLowerCase().split(","));
 
                 // Level 0: Strict Match (Artist AND Genre)
                 for (org.json.JSONObject song : allSongs) {
                     String trackArtist = song.optString("artistName", "").toLowerCase();
                     String trackGenre = song.optString("primaryGenreName", "").toLowerCase();
                     
-                    boolean artistMatch = prefArtists.isEmpty() || userArtists.stream().anyMatch(trackArtist::contains);
-                    boolean genreMatch = prefGenres.isEmpty() || userGenres.stream().anyMatch(trackGenre::contains);
+                    boolean artistMatch = prefArtists.trim().isEmpty() || finalUserArtists.stream().map(String::trim).anyMatch(trackArtist::contains);
+                    boolean genreMatch = prefGenres.trim().isEmpty() || finalUserGenres.stream().map(String::trim).anyMatch(trackGenre::contains);
                     
                     if (artistMatch && genreMatch) {
                         if (!filteredSongs.contains(song)) filteredSongs.add(song);
@@ -883,7 +927,7 @@ public class MainActivity extends AppCompatActivity {
                     for (org.json.JSONObject song : allSongs) {
                         if (!filteredSongs.contains(song)) {
                             String trackArtist = song.optString("artistName", "").toLowerCase();
-                            boolean artistMatch = prefArtists.isEmpty() || userArtists.stream().anyMatch(trackArtist::contains);
+                            boolean artistMatch = prefArtists.trim().isEmpty() || finalUserArtists.stream().map(String::trim).anyMatch(trackArtist::contains);
                             
                             // If artist matches, we accept it regardless of genre mismatch
                             if (artistMatch) {
@@ -924,6 +968,18 @@ public class MainActivity extends AppCompatActivity {
         LinearLayout container = currentContent.findViewById(R.id.playerPlaylistContainer);
         if (container == null) return;
         container.removeAllViews();
+        
+        if (songs.isEmpty()) {
+            TextView emptyView = new TextView(this);
+            emptyView.setText("No songs found. Please change your preference settings due to a wrong/mismatched combination.");
+            emptyView.setTextColor(android.graphics.Color.WHITE);
+            emptyView.setGravity(android.view.Gravity.CENTER);
+            emptyView.setPadding(0, 50, 0, 50);
+            container.addView(emptyView);
+            
+            if (subtitle != null) subtitle.setText("Found 0 matches. Settings conflict detected.");
+            return;
+        }
 
         for (org.json.JSONObject song : songs) {
             try {
@@ -948,12 +1004,30 @@ public class MainActivity extends AppCompatActivity {
                     loadImage(artworkUrl, albumArt);
                 }
 
-                itemView.setOnClickListener(v -> resolveSpotifyTrack(trackId, trackName, artistName));
+                String finalLang = langPref.isEmpty() ? "Global" : langPref;
+                itemView.setOnClickListener(v -> {
+                    logUserInteraction(genre, finalLang);
+                    resolveSpotifyTrack(trackId, trackName, artistName);
+                });
                 container.addView(itemView);
             } catch (Exception e) {
                 e.printStackTrace();
             }
         }
+    }
+
+    private void logUserInteraction(String genre, String lang) {
+        SharedPreferences prefs = getSharedPreferences("MusicZPrefs", MODE_PRIVATE);
+        try {
+            org.json.JSONObject freqMap = new org.json.JSONObject(prefs.getString("user_learned_preferences", "{}"));
+            if (!genre.isEmpty() && !"Unknown".equals(genre)) {
+                freqMap.put(genre, freqMap.optInt(genre, 0) + 1);
+            }
+            if (!lang.isEmpty() && !"Global".equals(lang)) {
+                freqMap.put(lang, freqMap.optInt(lang, 0) + 1);
+            }
+            prefs.edit().putString("user_learned_preferences", freqMap.toString()).apply();
+        } catch (Exception e) { e.printStackTrace(); }
     }
 
     private void resolveSpotifyTrack(String itunesTrackId, String trackName, String artistName) {
@@ -1805,14 +1879,11 @@ public class MainActivity extends AppCompatActivity {
         return Math.max(35, Math.min(98, score));
     }
 
-    private String inferStressLabel(long averageBpm) {
-        if (averageBpm >= 90L) {
-            return "Elevated";
+    private String inferStressLabel(long averageBpm, long steps) {
+        if (biometricClassifier != null && averageBpm > 0) {
+            return biometricClassifier.predictMood(averageBpm, steps).mood;
         }
-        if (averageBpm >= 76L) {
-            return "Balanced";
-        }
-        return "Low";
+        return "Unknown";
     }
 
     private String formatNumber(long value) {
@@ -1849,19 +1920,12 @@ public class MainActivity extends AppCompatActivity {
             }
             return "Calibrating neural biosensors. Waiting for stable biometric readings...";
         }
-        if (bpm > 100 && steps > 2000) {
-            return "High energy state detected. Your elevated heart rate aligns with recent physical activity.";
+        
+        if (biometricClassifier != null) {
+            BiometricClassifier.MoodPrediction prediction = biometricClassifier.predictMood(bpm, steps);
+            return "Mood: " + prediction.mood + " (Confidence: " + prediction.confidencePercent + "%)";
         }
-        if (bpm > 100) {
-            return "Elevated stress or resting heart rate detected. Consider taking a moment to breathe and reset.";
-        }
-        if (bpm >= 60 && bpm <= 80) {
-            return "Your biometric signature indicates a state of optimal tranquility. Heart rate variability is stable.";
-        }
-        if (bpm < 60 && bpm > 0) {
-            return "Deeply relaxed state. Your heart rate is exceptionally calm, indicating strong recovery.";
-        }
-        return "Your vitals are being monitored. Heart rate and activity levels are balanced.";
+        return "Calculating live mood...";
     }
 
     private void setTextIfPresent(View root, int viewId, String text) {

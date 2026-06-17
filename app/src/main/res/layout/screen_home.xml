@@ -190,100 +190,22 @@
                         android:textStyle="bold" />
                 </LinearLayout>
 
-                <LinearLayout
-                    android:id="@+id/bleDeviceList"
+                <TextView
+                    android:id="@+id/bleDeviceSelector"
                     android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
+                    android:layout_height="50dp"
                     android:layout_marginTop="12dp"
-                    android:orientation="vertical"
+                    android:background="@drawable/chip_bg"
+                    android:gravity="center_vertical"
+                    android:paddingStart="16dp"
+                    android:paddingEnd="16dp"
+                    android:text="Select a device ▾"
+                    android:textColor="@color/mood_text"
+                    android:textSize="14sp"
+                    android:textStyle="bold"
                     android:visibility="gone" />
             </LinearLayout>
 
-            <FrameLayout
-                android:layout_width="match_parent"
-                android:layout_height="330dp"
-                android:layout_marginTop="40dp"
-                android:background="@drawable/glass_panel_rounded_32"
-                android:padding="30dp">
-
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="match_parent"
-                    android:background="@drawable/recommend_inner_stroke"
-                    android:gravity="center_vertical"
-                    android:orientation="vertical"
-                    android:padding="30dp">
-
-                    <TextView
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="AI RECOMMENDATION"
-                        android:textColor="@color/mood_cyan"
-                        android:textSize="13sp"
-                        android:textStyle="bold" />
-
-                    <TextView
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="24dp"
-                        android:fontFamily="sans-serif-black"
-                        android:text="Focus &amp; Flow Protocol"
-                        android:textColor="@color/mood_text"
-                        android:textSize="36sp"
-                        android:textStyle="bold" />
-
-                    <TextView
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="16dp"
-                        android:lineSpacingExtra="5dp"
-                        android:text="Binaural beats layered with ambient soundscapes to lower your active stress response and enhance deep work."
-                        android:textColor="@color/mood_text"
-                        android:textSize="18sp" />
-
-                    <LinearLayout
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="26dp"
-                        android:gravity="center_vertical"
-                        android:orientation="horizontal">
-
-                        <ImageButton
-                            android:id="@+id/recommendPlayButton"
-                            android:layout_width="72dp"
-                            android:layout_height="72dp"
-                            android:background="@drawable/primary_button_bg"
-                            android:contentDescription="@string/nav_player"
-                            android:padding="21dp"
-                            android:src="@drawable/ic_play" />
-
-                        <LinearLayout
-                            android:layout_width="0dp"
-                            android:layout_height="wrap_content"
-                            android:layout_marginStart="18dp"
-                            android:layout_weight="1"
-                            android:orientation="vertical">
-
-                            <TextView
-                                android:layout_width="wrap_content"
-                                android:layout_height="wrap_content"
-                                android:text="45 Min Session"
-                                android:textColor="@color/mood_text"
-                                android:textSize="16sp"
-                                android:textStyle="bold" />
-
-                            <TextView
-                                android:layout_width="wrap_content"
-                                android:layout_height="wrap_content"
-                                android:layout_marginTop="3dp"
-                                android:text="Spatial Audio Enabled"
-                                android:textColor="@color/mood_text_muted"
-                                android:textSize="13sp"
-                                android:textStyle="bold" />
-                        </LinearLayout>
-                    </LinearLayout>
-                </LinearLayout>
-            </FrameLayout>
 
             <LinearLayout
                 android:layout_width="match_parent"

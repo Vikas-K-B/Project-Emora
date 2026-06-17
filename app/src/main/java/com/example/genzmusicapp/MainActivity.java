@@ -16,6 +16,10 @@ import android.bluetooth.le.ScanCallback;
 import android.bluetooth.le.ScanResult;
 import android.bluetooth.le.ScanSettings;
 import android.content.Context;
+import android.content.ComponentName;
+import android.content.ServiceConnection;
+import android.os.IBinder;
+import androidx.core.content.ContextCompat;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
@@ -34,6 +38,8 @@ import android.widget.ImageButton;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.SeekBar;
+import android.app.PendingIntent;
+import android.widget.Switch;
 import android.widget.TextView;
 import android.widget.Toast;
 import android.content.SharedPreferences;
@@ -97,7 +103,9 @@ public class MainActivity extends AppCompatActivity {
     private static final String SCREEN_LIVE = "live";
     private static final String SCREEN_PLAYER = "player";
     private static final String SCREEN_SETTINGS = "settings";
+    private static final String SCREEN_WELLNESS = "wellness";
     private static final String SCREEN_PREFERENCES = "preferences";
+    private static final String SCREEN_MAIN_SETTINGS = "main_settings";
     private static final String SCREEN_PROFILE = "profile";
 
     private static final String DEVICE_IMAGE_URL =
@@ -131,8 +139,15 @@ public class MainActivity extends AppCompatActivity {
 
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final ExecutorService imageExecutor = Executors.newFixedThreadPool(3);
+    private final ExecutorService dbExecutor = Executors.newSingleThreadExecutor();
 
-    private BiometricClassifier biometricClassifier;
+    private BluetoothForegroundService bluetoothService;
+    private boolean isServiceBound = false;
+    private String currentMoodLabel = "Unknown";
+    private String lastRecommendedMood = "";
+    private String previousScreenBeforeSettings = SCREEN_HOME;
+    private int devModeTapCount = 0;
+    private long lastDevModeTapTime = 0;
 
     private final Map<String, Bitmap> imageCache = new HashMap<>();
 
@@ -144,7 +159,45 @@ public class MainActivity extends AppCompatActivity {
     private HealthSnapshot latestHealthSnapshot = HealthSnapshot.defaultValues();
     private BluetoothAdapter bluetoothAdapter;
     private BluetoothLeScanner bluetoothLeScanner;
-    private BluetoothGatt watchGatt;
+
+    private final BluetoothForegroundService.BleDataCallback bleDataCallback = new BluetoothForegroundService.BleDataCallback() {
+        @Override
+        public void onStatusUpdated(String status) {
+            updateBleStatus(status);
+        }
+        @Override
+        public void onBiometricsUpdated(int bpm, long steps) {
+            latestHealthSnapshot = latestHealthSnapshot.withBpm(String.valueOf(bpm))
+                                                       .withSteps(String.valueOf(steps))
+                                                       .withWellnessScore(String.valueOf(calculateWellnessScore(bpm, steps)));
+            handler.post(() -> applyHealthSnapshot(currentContent));
+        }
+        @Override
+        public void onMoodPredicted(String mood, int confidence) {
+            currentMoodLabel = mood;
+            handler.post(() -> {
+                applyHealthSnapshot(currentContent);
+                if (SCREEN_PLAYER.equals(currentScreen) && !currentMoodLabel.equals(lastRecommendedMood)) {
+                    generateRecommendations(false);
+                }
+            });
+        }
+    };
+
+    private final ServiceConnection serviceConnection = new ServiceConnection() {
+        @Override
+        public void onServiceConnected(ComponentName className, IBinder service) {
+            BluetoothForegroundService.LocalBinder binder = (BluetoothForegroundService.LocalBinder) service;
+            bluetoothService = binder.getService();
+            isServiceBound = true;
+            bluetoothService.addCallback(bleDataCallback);
+        }
+        @Override
+        public void onServiceDisconnected(ComponentName arg0) {
+            isServiceBound = false;
+            bluetoothService = null;
+        }
+    };
     private boolean bleScanning;
     private String bleStatusText = "Scan and choose your watch for instant live data.";
     private String selectedBleDeviceLabel = "watch";
@@ -206,109 +259,6 @@ public class MainActivity extends AppCompatActivity {
         }
     };
 
-    private final BluetoothGattCallback watchGattCallback = new BluetoothGattCallback() {
-        @SuppressLint("MissingPermission")
-        @Override
-        public void onConnectionStateChange(BluetoothGatt gatt, int status, int newState) {
-            if (status != BluetoothGatt.GATT_SUCCESS) {
-                updateBleStatus("BLE connection failed for " + selectedBleDeviceLabel
-                        + " with GATT status " + status + ".");
-                closeWatchGatt();
-                return;
-            }
-
-            if (newState == BluetoothProfile.STATE_CONNECTED) {
-                updateBleStatus("Connected to " + selectedBleDeviceLabel + ". Preparing BLE session...");
-                handler.post(() -> syncHealthConnect(false));
-                if (hasBleConnectPermission()) {
-                    boolean mtuStarted = gatt.requestMtu(247);
-                    if (!mtuStarted) {
-                        gatt.discoverServices();
-                    }
-                }
-            } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
-                updateBleStatus(selectedBleDeviceLabel + " disconnected. Scan again to reconnect.");
-                closeWatchGatt();
-            }
-        }
-
-        @SuppressLint("MissingPermission")
-        @Override
-        public void onMtuChanged(BluetoothGatt gatt, int mtu, int status) {
-            if (hasBleConnectPermission()) {
-                updateBleStatus("Discovering live services on " + selectedBleDeviceLabel + "...");
-                gatt.discoverServices();
-            }
-        }
-
-        @Override
-        public void onServicesDiscovered(BluetoothGatt gatt, int status) {
-            if (status != BluetoothGatt.GATT_SUCCESS) {
-                updateBleStatus("Service discovery failed: " + status);
-                return;
-            }
-
-            int serviceCount = gatt.getServices() == null ? 0 : gatt.getServices().size();
-            BluetoothGattService customService = gatt.getService(BLE_CUSTOM_LIVE_SERVICE_UUID);
-            if (customService != null) {
-                BluetoothGattCharacteristic customNotifyCharacteristic =
-                        customService.getCharacteristic(BLE_CUSTOM_NOTIFY_CHARACTERISTIC_UUID);
-                if (customNotifyCharacteristic != null) {
-                    enableLiveNotifications(gatt, customNotifyCharacteristic);
-                    return;
-                }
-            }
-
-            BluetoothGattService heartRateService = gatt.getService(BLE_STANDARD_HEART_RATE_SERVICE_UUID);
-            if (heartRateService != null) {
-                BluetoothGattCharacteristic heartRateCharacteristic =
-                        heartRateService.getCharacteristic(BLE_STANDARD_HEART_RATE_MEASUREMENT_UUID);
-                if (heartRateCharacteristic != null) {
-                    enableLiveNotifications(gatt, heartRateCharacteristic);
-                    return;
-                }
-            }
-
-            BluetoothGattCharacteristic fallbackNotifyCharacteristic = findFirstNotifyCharacteristic(gatt);
-            if (fallbackNotifyCharacteristic != null) {
-                updateBleStatus("Using generic notify channel "
-                        + shortUuid(fallbackNotifyCharacteristic.getUuid()) + " on " + selectedBleDeviceLabel + ".");
-                enableLiveNotifications(gatt, fallbackNotifyCharacteristic);
-                return;
-            }
-
-            updateBleStatus("Connected to " + selectedBleDeviceLabel
-                    + " and found " + serviceCount
-                    + " services, but no supported live heart-rate channel was found.");
-        }
-
-        @Override
-        public void onDescriptorWrite(
-                BluetoothGatt gatt,
-                BluetoothGattDescriptor descriptor,
-                int status) {
-            if (status == BluetoothGatt.GATT_SUCCESS) {
-                updateBleStatus("Live BLE connected to " + selectedBleDeviceLabel + ". Waiting for data...");
-            } else {
-                updateBleStatus("BLE notify setup failed on " + selectedBleDeviceLabel
-                        + " with status " + status + ".");
-            }
-        }
-
-        @SuppressWarnings("deprecation")
-        @Override
-        public void onCharacteristicChanged(BluetoothGatt gatt, BluetoothGattCharacteristic characteristic) {
-            handleLiveCharacteristic(characteristic.getUuid(), characteristic.getValue());
-        }
-
-        @Override
-        public void onCharacteristicChanged(
-                BluetoothGatt gatt,
-                BluetoothGattCharacteristic characteristic,
-                byte[] value) {
-            handleLiveCharacteristic(characteristic.getUuid(), value);
-        }
-    };
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -316,7 +266,6 @@ public class MainActivity extends AppCompatActivity {
         EdgeToEdge.enable(this);
         setContentView(R.layout.activity_main);
         
-        biometricClassifier = new BiometricClassifier(this);
 
         ViewCompat.setOnApplyWindowInsetsListener(findViewById(R.id.main), (view, insets) -> {
             Insets systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars());
@@ -334,6 +283,10 @@ public class MainActivity extends AppCompatActivity {
         }
         setupBottomNavigation();
         setupBackNavigation();
+        
+        scheduleSummaryAlarms();
+        requestNotificationPermission();
+        handleIntent(getIntent());
         showScreen(SCREEN_SPLASH);
 
         handler.postDelayed(() -> {
@@ -342,29 +295,81 @@ public class MainActivity extends AppCompatActivity {
             }
         }, 1700);
     }
+    
+    private void scheduleSummaryAlarms() {
+        android.app.AlarmManager alarmManager = (android.app.AlarmManager) getSystemService(Context.ALARM_SERVICE);
+        if (alarmManager == null) return;
+        
+        Intent dailyIntent = new Intent(this, WellnessNotificationReceiver.class);
+        dailyIntent.setAction(WellnessNotificationReceiver.ACTION_DAILY_SUMMARY);
+        PendingIntent dailyPendingIntent = PendingIntent.getBroadcast(this, 100, dailyIntent, PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
+        
+        java.util.Calendar calendar = java.util.Calendar.getInstance();
+        calendar.set(java.util.Calendar.HOUR_OF_DAY, 20); // 8 PM
+        calendar.set(java.util.Calendar.MINUTE, 0);
+        calendar.set(java.util.Calendar.SECOND, 0);
+        if (calendar.getTimeInMillis() <= System.currentTimeMillis()) {
+            calendar.add(java.util.Calendar.DAY_OF_YEAR, 1);
+        }
+        
+        alarmManager.setInexactRepeating(android.app.AlarmManager.RTC_WAKEUP, calendar.getTimeInMillis(), android.app.AlarmManager.INTERVAL_DAY, dailyPendingIntent);
+        
+        Intent weeklyIntent = new Intent(this, WellnessNotificationReceiver.class);
+        weeklyIntent.setAction(WellnessNotificationReceiver.ACTION_WEEKLY_SUMMARY);
+        PendingIntent weeklyPendingIntent = PendingIntent.getBroadcast(this, 101, weeklyIntent, PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
+        
+        java.util.Calendar weeklyCalendar = java.util.Calendar.getInstance();
+        weeklyCalendar.set(java.util.Calendar.DAY_OF_WEEK, java.util.Calendar.SUNDAY);
+        weeklyCalendar.set(java.util.Calendar.HOUR_OF_DAY, 20); // 8 PM Sunday
+        weeklyCalendar.set(java.util.Calendar.MINUTE, 0);
+        weeklyCalendar.set(java.util.Calendar.SECOND, 0);
+        if (weeklyCalendar.getTimeInMillis() <= System.currentTimeMillis()) {
+            weeklyCalendar.add(java.util.Calendar.WEEK_OF_YEAR, 1);
+        }
+        
+        alarmManager.setInexactRepeating(android.app.AlarmManager.RTC_WAKEUP, weeklyCalendar.getTimeInMillis(), android.app.AlarmManager.INTERVAL_DAY * 7, weeklyPendingIntent);
+    }
 
     @Override
     protected void onDestroy() {
         super.onDestroy();
-        if (biometricClassifier != null) {
-            biometricClassifier.close();
-        }
-        if (watchGatt != null) {
-            if (ActivityCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED) {
-                watchGatt.disconnect();
-                watchGatt.close();
-            }
-            watchGatt = null;
+
+        if (isServiceBound) {
+            if (bluetoothService != null) bluetoothService.removeCallback(bleDataCallback);
+            unbindService(serviceConnection);
+            isServiceBound = false;
         }
         stopBleScan();
         imageExecutor.shutdownNow();
+    }
+
+    private void requestNotificationPermission() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (androidx.core.content.ContextCompat.checkSelfPermission(this, android.Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+                requestPermissions(new String[]{android.Manifest.permission.POST_NOTIFICATIONS}, 1002);
+            }
+        }
+    }
+
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        handleIntent(intent);
+    }
+
+    private void handleIntent(Intent intent) {
+        if (intent != null && intent.getBooleanExtra("OPEN_PLAYER", false)) {
+            showScreen(SCREEN_PLAYER);
+            generateRecommendations(true);
+        }
     }
 
     private void setupBottomNavigation() {
         findViewById(R.id.navHome).setOnClickListener(view -> showScreen(SCREEN_HOME));
         findViewById(R.id.navLive).setOnClickListener(view -> showScreen(SCREEN_LIVE));
         findViewById(R.id.navPlayer).setOnClickListener(view -> showScreen(SCREEN_PLAYER));
-        findViewById(R.id.navWellness).setOnClickListener(view -> showScreen(SCREEN_SETTINGS));
+        findViewById(R.id.navWellness).setOnClickListener(view -> showScreen(SCREEN_WELLNESS));
     }
 
     private void setupBackNavigation() {
@@ -373,15 +378,86 @@ public class MainActivity extends AppCompatActivity {
             public void handleOnBackPressed() {
                 if (SCREEN_LIVE.equals(currentScreen)
                         || SCREEN_PLAYER.equals(currentScreen)
-                        || SCREEN_SETTINGS.equals(currentScreen)) {
+                        || SCREEN_WELLNESS.equals(currentScreen)) {
                     showScreen(SCREEN_HOME);
-                    return;
+                } else if (SCREEN_MAIN_SETTINGS.equals(currentScreen)) {
+                    showScreen(previousScreenBeforeSettings != null ? previousScreenBeforeSettings : SCREEN_HOME);
+                } else if (SCREEN_PREFERENCES.equals(currentScreen) || SCREEN_SETTINGS.equals(currentScreen)) {
+                    showScreen(SCREEN_MAIN_SETTINGS);
+                } else {
+                    setEnabled(false);
+                    getOnBackPressedDispatcher().onBackPressed();
                 }
-
-                setEnabled(false);
-                getOnBackPressedDispatcher().onBackPressed();
             }
         });
+    }
+
+    public void showDiagnosticsDialog() {
+        View overlay = findViewById(R.id.diagnosticsOverlay);
+        if (overlay == null) return;
+        overlay.setVisibility(View.VISIBLE);
+        
+        View closeBtn = findViewById(R.id.diagnosticsCloseButton);
+        if (closeBtn != null) {
+            closeBtn.setOnClickListener(v -> overlay.setVisibility(View.GONE));
+        }
+        
+        refreshDiagnosticsUI();
+    }
+    
+    public void refreshDiagnosticsUI() {
+        View overlay = findViewById(R.id.diagnosticsOverlay);
+        if (overlay == null || overlay.getVisibility() != View.VISIBLE) return;
+        
+        TextView balanceText = findViewById(R.id.diagnosticsBalanceText);
+        TextView scoresText = findViewById(R.id.diagnosticsScoresText);
+        ProgressBar loading = findViewById(R.id.diagnosticsLoading);
+        
+        if (loading != null) loading.setVisibility(View.GONE);
+        
+        SharedPreferences prefs = getSharedPreferences("MusicZPrefs", MODE_PRIVATE);
+        String statsJson = prefs.getString("diagnostics_json", "{}");
+        
+        try {
+            org.json.JSONObject stats = new org.json.JSONObject(statsJson);
+            StringBuilder balanceMsg = new StringBuilder("--- Playlist Balance ---\n");
+            StringBuilder scoresMsg = new StringBuilder("--- Top Tracks Breakdown ---\n");
+            
+            org.json.JSONObject artistCounts = stats.optJSONObject("artistCounts");
+            if (artistCounts != null) {
+                java.util.Iterator<String> keys = artistCounts.keys();
+                while (keys.hasNext()) {
+                    String artist = keys.next();
+                    balanceMsg.append(artist).append(": ").append(artistCounts.getInt(artist)).append(" songs\n");
+                }
+            } else {
+                balanceMsg.append("No balance data available.");
+            }
+            
+            org.json.JSONArray scores = stats.optJSONArray("scores");
+            if (scores != null && scores.length() > 0) {
+                for (int i = 0; i < Math.min(20, scores.length()); i++) {
+                    org.json.JSONObject s = scores.getJSONObject(i);
+                    scoresMsg.append(s.getInt("rank")).append(". ").append(s.getString("name")).append("\n");
+                    scoresMsg.append("   Score: ").append(s.getInt("totalScore"))
+                       .append(" (M:").append(s.getInt("mood"))
+                       .append(" L:").append(s.getInt("lang"))
+                       .append(" A:").append(s.getInt("artistScore"))
+                       .append(" G:").append(s.getInt("genre"))
+                       .append(" H:").append(s.getInt("history"))
+                       .append(" P:-").append(s.getInt("penalty")).append(")\n\n");
+                }
+            } else {
+                scoresMsg.append("No recent recommendations found.");
+            }
+            
+            if (balanceText != null) balanceText.setText(balanceMsg.toString());
+            if (scoresText != null) scoresText.setText(scoresMsg.toString());
+            
+        } catch (Exception e) {
+            if (balanceText != null) balanceText.setText("Diagnostics unavailable");
+            if (scoresText != null) scoresText.setText("");
+        }
     }
 
     private void showScreen(String screen) {
@@ -410,11 +486,14 @@ public class MainActivity extends AppCompatActivity {
                 return R.layout.screen_player;
             case SCREEN_SETTINGS:
                 return R.layout.screen_settings;
+            case SCREEN_WELLNESS:
+                return R.layout.screen_wellness;
             case SCREEN_PREFERENCES:
                 return R.layout.screen_preferences;
+            case SCREEN_MAIN_SETTINGS:
+                return R.layout.screen_main_settings;
             case SCREEN_PROFILE:
                 return R.layout.screen_profile;
-            case SCREEN_SPLASH:
             default:
                 return R.layout.screen_splash;
         }
@@ -429,12 +508,37 @@ public class MainActivity extends AppCompatActivity {
 
         TextView topBrand = content.findViewById(R.id.topBrand);
         if (topBrand != null) {
-            topBrand.setOnClickListener(view -> showScreen(SCREEN_HOME));
+            topBrand.setOnClickListener(view -> {
+                long now = System.currentTimeMillis();
+                if (now - lastDevModeTapTime > 1000) {
+                    devModeTapCount = 0;
+                }
+                lastDevModeTapTime = now;
+                devModeTapCount++;
+                
+                SharedPreferences prefs = getSharedPreferences("MusicZPrefs", MODE_PRIVATE);
+                boolean isDevMode = prefs.getBoolean("developer_mode", false);
+                
+                if (isDevMode) {
+                    showDiagnosticsDialog();
+                } else {
+                    if (devModeTapCount >= 7) {
+                        prefs.edit().putBoolean("developer_mode", true).apply();
+                        Toast.makeText(this, "Developer Mode Unlocked!", Toast.LENGTH_SHORT).show();
+                        showDiagnosticsDialog();
+                    } else if (devModeTapCount >= 4) {
+                        Toast.makeText(this, "Tap " + (7 - devModeTapCount) + " more times to unlock developer mode.", Toast.LENGTH_SHORT).show();
+                    }
+                }
+            });
         }
 
         ImageButton settingsButton = content.findViewById(R.id.settingsButton);
         if (settingsButton != null) {
-            settingsButton.setOnClickListener(view -> showScreen(SCREEN_PREFERENCES));
+            settingsButton.setOnClickListener(view -> {
+                previousScreenBeforeSettings = currentScreen;
+                showScreen(SCREEN_MAIN_SETTINGS);
+            });
         }
 
         View getStartedButton = content.findViewById(R.id.getStartedButton);
@@ -442,10 +546,7 @@ public class MainActivity extends AppCompatActivity {
             getStartedButton.setOnClickListener(view -> showScreen(SCREEN_HOME));
         }
 
-        View recommendPlayButton = content.findViewById(R.id.recommendPlayButton);
-        if (recommendPlayButton != null) {
-            recommendPlayButton.setOnClickListener(view -> showScreen(SCREEN_PLAYER));
-        }
+
 
         View viewDetailsButton = content.findViewById(R.id.viewDetailsButton);
         if (viewDetailsButton != null) {
@@ -465,10 +566,6 @@ public class MainActivity extends AppCompatActivity {
             bleConnectButton.setOnClickListener(view -> connectLiveBleWatch());
         }
         
-        View wellnessConnectButton = content.findViewById(R.id.wellnessConnectButton);
-        if (wellnessConnectButton != null) {
-            wellnessConnectButton.setOnClickListener(view -> connectLiveBleWatch());
-        }
 
         ImageView onboardingImage = content.findViewById(R.id.onboardingDeviceImage);
         if (onboardingImage != null) {
@@ -480,10 +577,14 @@ public class MainActivity extends AppCompatActivity {
             configurePlayerScreen(content);
         } else if (SCREEN_PREFERENCES.equals(screen)) {
             configurePreferencesScreen(content);
-        } else if (SCREEN_SETTINGS.equals(screen)) {
-            configureWellnessScreen(content);
         } else if (SCREEN_PROFILE.equals(screen)) {
             configureProfileScreen(content);
+        } else if (SCREEN_WELLNESS.equals(screen)) {
+            configureWellnessScreen(content);
+        } else if (SCREEN_MAIN_SETTINGS.equals(screen)) {
+            configureMainSettingsScreen(content);
+        } else if (SCREEN_SETTINGS.equals(screen)) {
+            configureSettingsScreen(content);
         }
 
         applyHealthSnapshot(content);
@@ -579,7 +680,7 @@ public class MainActivity extends AppCompatActivity {
     private void configurePreferencesScreen(View content) {
         View backBtn = content.findViewById(R.id.backToWellnessButton);
         if (backBtn != null) {
-            backBtn.setOnClickListener(v -> showScreen(SCREEN_SETTINGS));
+            backBtn.setOnClickListener(v -> showScreen(SCREEN_MAIN_SETTINGS));
         }
 
         SharedPreferences prefs = getSharedPreferences("MusicZPrefs", MODE_PRIVATE);
@@ -599,6 +700,31 @@ public class MainActivity extends AppCompatActivity {
         EditText editMusicType = content.findViewById(R.id.editMusicType);
         setupChipGroup(groupMusicType, editMusicType, prefs.getString("prefMusicType", "Relaxation"));
 
+        android.widget.Spinner spinnerMusicApp = content.findViewById(R.id.spinnerMusicApp);
+        java.util.List<String> musicAppNames = new java.util.ArrayList<>();
+        final java.util.List<String> musicAppPackages = new java.util.ArrayList<>();
+        musicAppNames.add("System Default (Ask every time)");
+        musicAppPackages.add("");
+
+        android.content.Intent searchIntent = new android.content.Intent(android.provider.MediaStore.INTENT_ACTION_MEDIA_PLAY_FROM_SEARCH);
+        java.util.List<android.content.pm.ResolveInfo> resolveInfos = getPackageManager().queryIntentActivities(searchIntent, 0);
+        for (android.content.pm.ResolveInfo info : resolveInfos) {
+            musicAppNames.add(info.loadLabel(getPackageManager()).toString());
+            musicAppPackages.add(info.activityInfo.packageName);
+        }
+
+        if (spinnerMusicApp != null) {
+            android.widget.ArrayAdapter<String> adapter = new android.widget.ArrayAdapter<>(this, android.R.layout.simple_spinner_item, musicAppNames);
+            adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+            spinnerMusicApp.setAdapter(adapter);
+
+            String savedPackage = prefs.getString("prefMusicApp", "");
+            int savedIndex = musicAppPackages.indexOf(savedPackage);
+            if (savedIndex >= 0) {
+                spinnerMusicApp.setSelection(savedIndex);
+            }
+        }
+
         View saveBtn = content.findViewById(R.id.saveSettingsButton);
         if (saveBtn != null) {
             saveBtn.setOnClickListener(v -> {
@@ -607,6 +733,12 @@ public class MainActivity extends AppCompatActivity {
                 editor.putString("prefGenres", getSelectedChips(groupGenres, editGenres));
                 if (editArtists != null) editor.putString("prefArtists", editArtists.getText().toString());
                 editor.putString("prefMusicType", getSelectedChips(groupMusicType, editMusicType));
+                if (spinnerMusicApp != null) {
+                    int selectedIndex = spinnerMusicApp.getSelectedItemPosition();
+                    if (selectedIndex >= 0 && selectedIndex < musicAppPackages.size()) {
+                        editor.putString("prefMusicApp", musicAppPackages.get(selectedIndex));
+                    }
+                }
                 editor.apply();
                 Toast.makeText(MainActivity.this, "Preferences Saved!", Toast.LENGTH_SHORT).show();
             });
@@ -632,138 +764,239 @@ public class MainActivity extends AppCompatActivity {
         setTextIfPresent(content, R.id.profileLanguage, lang.isEmpty() ? "None" : lang);
         setTextIfPresent(content, R.id.profileGenre, genre.isEmpty() ? "None" : genre);
     }
-    private void configureWellnessScreen(View content) {
-        TextView scoreText = content.findViewById(R.id.stabilityScoreText);
-        TextView statusText = content.findViewById(R.id.stabilityStatusText);
-        TextView zoneText = content.findViewById(R.id.stabilityZoneText);
-
-        long bpm = parseLongSafe(latestHealthSnapshot.bpmText);
-        long steps = parseLongSafe(latestHealthSnapshot.stepsText);
-        
-        setTextIfPresent(content, R.id.wellnessBpmText, latestHealthSnapshot.bpmText);
-        setTextIfPresent(content, R.id.wellnessStepsText, formatNumber(steps));
-        
-        java.text.SimpleDateFormat timeFormat = new java.text.SimpleDateFormat("h:mm a", Locale.US);
-        setTextIfPresent(content, R.id.wellnessSyncText, "Today, " + timeFormat.format(new java.util.Date()));
-        
-        if (bpm > 0) {
-            long score = calculateWellnessScore(bpm, steps);
-            
-            if (scoreText != null) scoreText.setText(String.valueOf(score));
-            
-            if (statusText != null && zoneText != null) {
-                if (biometricClassifier != null) {
-                    BiometricClassifier.MoodPrediction prediction = biometricClassifier.predictMood(bpm, steps);
-                    statusText.setText(prediction.mood);
-                    zoneText.setText("Confidence: " + prediction.confidencePercent + "%");
-                    
-                    if (prediction.mood.equals("Stressed")) {
-                        statusText.setTextColor(android.graphics.Color.parseColor("#ffb4ab"));
-                    } else if (prediction.mood.equals("Energetic")) {
-                        statusText.setTextColor(android.graphics.Color.parseColor("#ffafd3"));
-                    } else {
-                        statusText.setTextColor(android.graphics.Color.WHITE);
-                    }
-                } else {
-                    statusText.setText("Unknown");
-                    zoneText.setText("Awaiting Model");
-                }
-            }
-        } else {
-            if (scoreText != null) scoreText.setText("--");
-            if (statusText != null) {
-                statusText.setText("Unknown");
-                statusText.setTextColor(android.graphics.Color.parseColor("#849495"));
-            }
-            if (zoneText != null) zoneText.setText("Sync watch to calculate.");
+    private void configureMainSettingsScreen(View content) {
+        View backBtn = content.findViewById(R.id.backFromMainSettingsButton);
+        if (backBtn != null) {
+            backBtn.setOnClickListener(v -> showScreen(previousScreenBeforeSettings != null ? previousScreenBeforeSettings : SCREEN_HOME));
         }
+
+        View btnPreferences = content.findViewById(R.id.btnOpenPreferences);
+        if (btnPreferences != null) {
+            btnPreferences.setOnClickListener(v -> showScreen(SCREEN_PREFERENCES));
+        }
+
+        View btnNotifications = content.findViewById(R.id.btnOpenNotifications);
+        if (btnNotifications != null) {
+            btnNotifications.setOnClickListener(v -> showScreen(SCREEN_SETTINGS));
+        }
+    }
+
+    private void configureSettingsScreen(View content) {
+        View backBtn = content.findViewById(R.id.backFromSettingsButton);
+        if (backBtn != null) {
+            backBtn.setOnClickListener(v -> showScreen(SCREEN_MAIN_SETTINGS));
+        }
+
+        SharedPreferences prefs = getSharedPreferences("MusicZPrefs", MODE_PRIVATE);
         
-        // Dynamic Timeline Rendering
-        LinearLayout container = content.findViewById(R.id.timelineContainer);
-        LinearLayout labels = content.findViewById(R.id.timelineLabels);
-        if (container != null && labels != null) {
-            container.removeAllViews();
-            labels.removeAllViews();
-            
-            SharedPreferences prefs = getSharedPreferences("MusicZPrefs", MODE_PRIVATE);
-            String historyJson = prefs.getString("weeklyHistory", "{}");
-            
-            java.util.Calendar cal = java.util.Calendar.getInstance();
-            java.text.SimpleDateFormat sdf = new java.text.SimpleDateFormat("yyyy-MM-dd", Locale.US);
-            java.text.SimpleDateFormat dayFormat = new java.text.SimpleDateFormat("EEE", Locale.US);
-            
-            // Save today's latest data
+        Switch switchStressAlerts = content.findViewById(R.id.switchStressAlerts);
+        Switch switchDailySummary = content.findViewById(R.id.switchDailySummary);
+        Switch switchWeeklySummary = content.findViewById(R.id.switchWeeklySummary);
+        Switch switchAchievements = content.findViewById(R.id.switchAchievements);
+        
+        if (switchStressAlerts != null) {
+            switchStressAlerts.setChecked(prefs.getBoolean("prefStressAlerts", true));
+            switchStressAlerts.setOnCheckedChangeListener((btn, isChecked) -> prefs.edit().putBoolean("prefStressAlerts", isChecked).apply());
+        }
+        if (switchDailySummary != null) {
+            switchDailySummary.setChecked(prefs.getBoolean("prefDailySummary", true));
+            switchDailySummary.setOnCheckedChangeListener((btn, isChecked) -> prefs.edit().putBoolean("prefDailySummary", isChecked).apply());
+        }
+        if (switchWeeklySummary != null) {
+            switchWeeklySummary.setChecked(prefs.getBoolean("prefWeeklySummary", true));
+            switchWeeklySummary.setOnCheckedChangeListener((btn, isChecked) -> prefs.edit().putBoolean("prefWeeklySummary", isChecked).apply());
+        }
+        if (switchAchievements != null) {
+            switchAchievements.setChecked(prefs.getBoolean("prefAchievements", true));
+            switchAchievements.setOnCheckedChangeListener((btn, isChecked) -> prefs.edit().putBoolean("prefAchievements", isChecked).apply());
+        }
+    }
+
+    private void configureWellnessScreen(View content) {
+        TextView tvScoreValue = content.findViewById(R.id.tvEmotionalScoreValue);
+        TextView tvScoreTrend = content.findViewById(R.id.tvEmotionalScoreTrend);
+        TextView tvScoreLabel = content.findViewById(R.id.tvEmotionalScoreLabel);
+        TextView tvScoreSubLabel = content.findViewById(R.id.tvEmotionalScoreSubLabel);
+        TextView tvBaselineHR = content.findViewById(R.id.tvBaselineHR);
+        TextView tvWeeklyLogs = content.findViewById(R.id.tvWeeklyLogs);
+        com.example.genzmusicapp.StressChartView stressChart = content.findViewById(R.id.stressChart);
+        TextView tvMoodDist = content.findViewById(R.id.tvMoodDistribution);
+        TextView tvAiTitle = content.findViewById(R.id.tvExplainableAnalysisTitle);
+        TextView tvAiDesc = content.findViewById(R.id.tvExplainableAnalysisDesc);
+
+        if (tvScoreValue == null) return; // Layout not loaded properly
+
+        java.util.concurrent.Executors.newSingleThreadExecutor().execute(() -> {
             try {
-                org.json.JSONObject history = new org.json.JSONObject(historyJson);
-                String todayKey = sdf.format(cal.getTime());
-                if (bpm > 0 && scoreText != null && !scoreText.getText().toString().equals("--")) {
-                    org.json.JSONObject todayData = new org.json.JSONObject();
-                    todayData.put("score", Integer.parseInt(scoreText.getText().toString()));
-                    history.put(todayKey, todayData);
-                    prefs.edit().putString("weeklyHistory", history.toString()).apply();
-                }
-                
-                // Render last 7 days
-                for (int i = 6; i >= 0; i--) {
-                    java.util.Calendar dayCal = java.util.Calendar.getInstance();
-                    dayCal.add(java.util.Calendar.DAY_OF_YEAR, -i);
-                    String dateKey = sdf.format(dayCal.getTime());
-                    String dayName = dayFormat.format(dayCal.getTime());
-                    boolean isToday = i == 0;
+                java.util.List<com.example.genzmusicapp.db.WellnessHistory> history =
+                        com.example.genzmusicapp.db.AppDatabase.getDatabase(this).wellnessDao().getRecentHistory(500);
+
+                runOnUiThread(() -> {
+                    if (history == null || history.isEmpty()) {
+                        tvScoreValue.setText("-- / 100");
+                        tvScoreTrend.setText("No data yet");
+                        tvScoreLabel.setText("Need More Data");
+                        tvScoreSubLabel.setText("Wear watch to start collecting");
+                        tvBaselineHR.setText("-- bpm");
+                        tvWeeklyLogs.setText("0 logs");
+                        tvMoodDist.setText("Not enough data to calculate mood distribution.");
+                        tvAiTitle.setText("Gathering Baseline...");
+                        tvAiDesc.setText("Keep syncing your watch. Analytics require at least a few entries to generate an explainable analysis.");
+                        return;
+                    }
+
+                    // 1. Weekly Logs
+                    tvWeeklyLogs.setText(history.size() + " logs");
+
+                    // 2. Calculate Baseline HR and Variance
+                    long totalHr = 0;
+                    for (com.example.genzmusicapp.db.WellnessHistory h : history) {
+                        totalHr += h.bpm;
+                    }
+                    double avgHr = (double) totalHr / history.size();
+                    tvBaselineHR.setText(Math.round(avgHr) + " bpm");
+
+                    double varianceSum = 0;
+                    for (com.example.genzmusicapp.db.WellnessHistory h : history) {
+                        varianceSum += Math.pow(h.bpm - avgHr, 2);
+                    }
+                    double stdDevHr = Math.sqrt(varianceSum / history.size());
+
+                    // 3. Mood Distribution
+                    java.util.Map<String, Integer> moodCounts = new java.util.HashMap<>();
+                    int stressedCount = 0;
+                    int calmCount = 0;
+                    for (com.example.genzmusicapp.db.WellnessHistory h : history) {
+                        String mood = h.calculatedMood;
+                        if (mood == null || mood.isEmpty()) mood = "Unknown";
+                        moodCounts.put(mood, moodCounts.getOrDefault(mood, 0) + 1);
+                        if (mood.equalsIgnoreCase("Stressed") || mood.equalsIgnoreCase("Anxious")) stressedCount++;
+                        if (mood.equalsIgnoreCase("Relax") || mood.equalsIgnoreCase("Calm")) calmCount++;
+                    }
+
+                    StringBuilder distStr = new StringBuilder();
+                    for (java.util.Map.Entry<String, Integer> entry : moodCounts.entrySet()) {
+                        int percent = (int) Math.round((entry.getValue() * 100.0) / history.size());
+                        if (percent > 0) {
+                            distStr.append("• ").append(entry.getKey()).append(": ").append(percent).append("%\n");
+                        }
+                    }
+                    tvMoodDist.setText(distStr.toString().trim());
+
+                    // 4. Calculate Emotional Stability Score
+                    // Base 100
+                    // - Penalty for high HR variance (stdDev > 10)
+                    // - Penalty for high stress %
+                    // - Bonus for high calm %
+                    double stressRatio = (double) stressedCount / history.size();
+                    double calmRatio = (double) calmCount / history.size();
                     
-                    int dayScore = 0;
-                    if (history.has(dateKey)) {
-                        dayScore = history.getJSONObject(dateKey).optInt("score", 0);
+                    double score = 100.0;
+                    if (stdDevHr > 10) score -= (stdDevHr - 10) * 1.5;
+                    score -= (stressRatio * 30.0);
+                    score += (calmRatio * 15.0);
+                    
+                    if (score > 100) score = 100;
+                    if (score < 10) score = 10;
+                    
+                    int finalScore = (int) Math.round(score);
+                    tvScoreValue.setText(finalScore + " / 100");
+
+                    // Trend
+                    tvScoreTrend.setText(finalScore >= 80 ? "Optimal Range" : (finalScore >= 50 ? "Moderate Fluctuation" : "High Volatility"));
+
+                    if (finalScore >= 80) {
+                        tvScoreLabel.setText("Highly Stable");
+                        tvScoreLabel.setTextColor(android.graphics.Color.parseColor("#00dce5")); // Cyan
+                        tvScoreSubLabel.setText("Excellent cardiovascular consistency.");
+                    } else if (finalScore >= 50) {
+                        tvScoreLabel.setText("Balanced");
+                        tvScoreLabel.setTextColor(android.graphics.Color.parseColor("#ffafd3")); // Pink
+                        tvScoreSubLabel.setText("Normal daily fluctuations.");
+                    } else {
+                        tvScoreLabel.setText("Elevated Stress");
+                        tvScoreLabel.setTextColor(android.graphics.Color.parseColor("#ffb4ab")); // Red
+                        tvScoreSubLabel.setText("Higher than normal variability.");
+                    }
+
+                    // 5. Explainable AI Insight
+                    if (finalScore >= 80) {
+                        tvAiTitle.setText("Optimal Recovery State");
+                        tvAiDesc.setText("Your average HR is perfectly aligned at " + Math.round(avgHr) + " bpm. With " + Math.round(calmRatio * 100) + "% of your recent logs categorized as Calm/Relaxed and very low variance (" + String.format(java.util.Locale.US, "%.1f", stdDevHr) + " deviation), your nervous system is showing strong parasympathetic tone.");
+                    } else if (stressRatio > 0.4) {
+                        tvAiTitle.setText("High Stress Load Detected");
+                        tvAiDesc.setText("We noticed that " + Math.round(stressRatio * 100) + "% of your recent logs indicate stress. Your heart rate variability is elevated. We recommend utilizing the Binaural Beats playlist to trigger a parasympathetic response and lower your active stress.");
+                    } else {
+                        tvAiTitle.setText("Mixed Activity Patterns");
+                        tvAiDesc.setText("Your heart rate averages " + Math.round(avgHr) + " bpm with a mix of moods. The standard deviation is " + String.format(java.util.Locale.US, "%.1f", stdDevHr) + ", indicating frequent transitions between rest and activity. Maintain steady routines for better flow state.");
+                    }
+
+                    // 6. Weekly Stress Timeline (Chart)
+                    // Aggregate by day of week
+                    float[] chartValues = new float[7];
+                    String[] chartLabels = new String[7];
+                    
+                    java.util.Calendar cal = java.util.Calendar.getInstance();
+                    java.text.SimpleDateFormat dayFormat = new java.text.SimpleDateFormat("EEE", java.util.Locale.US);
+                    
+                    for (int i = 6; i >= 0; i--) {
+                        java.util.Calendar dayCal = java.util.Calendar.getInstance();
+                        dayCal.add(java.util.Calendar.DAY_OF_YEAR, -i);
+                        
+                        // Set start and end of day
+                        dayCal.set(java.util.Calendar.HOUR_OF_DAY, 0);
+                        dayCal.set(java.util.Calendar.MINUTE, 0);
+                        dayCal.set(java.util.Calendar.SECOND, 0);
+                        long startOfDay = dayCal.getTimeInMillis();
+                        
+                        dayCal.set(java.util.Calendar.HOUR_OF_DAY, 23);
+                        dayCal.set(java.util.Calendar.MINUTE, 59);
+                        dayCal.set(java.util.Calendar.SECOND, 59);
+                        long endOfDay = dayCal.getTimeInMillis();
+                        
+                        // Find entries for this day
+                        long dayHrSum = 0;
+                        int dayEntries = 0;
+                        for (com.example.genzmusicapp.db.WellnessHistory h : history) {
+                            if (h.timestamp >= startOfDay && h.timestamp <= endOfDay) {
+                                dayHrSum += h.bpm;
+                                dayEntries++;
+                            }
+                        }
+                        
+                        float dayStress = 0f;
+                        if (dayEntries > 0) {
+                            float dayAvgHr = (float) dayHrSum / dayEntries;
+                            // Convert HR to a 0.0 - 1.0 "stress" value (assuming 60 is lowest, 120+ is max)
+                            dayStress = (dayAvgHr - 60f) / 60f;
+                            if (dayStress < 0.1f) dayStress = 0.1f;
+                            if (dayStress > 1.0f) dayStress = 1.0f;
+                        }
+                        
+                        chartValues[6 - i] = dayStress;
+                        chartLabels[6 - i] = dayFormat.format(dayCal.getTime());
                     }
                     
-                    // Bar
-                    View bar = new View(this);
-                    LinearLayout.LayoutParams barParams = new LinearLayout.LayoutParams(
-                            dp(24),
-                            dayScore > 0 ? dp(dayScore) : dp(2)
-                    );
-                    barParams.weight = 0;
-                    barParams.leftMargin = dp(8);
-                    barParams.rightMargin = dp(8);
-                    bar.setLayoutParams(barParams);
-                    bar.setBackgroundColor(isToday ? android.graphics.Color.parseColor("#00dce5") 
-                            : (dayScore > 0 ? android.graphics.Color.parseColor("#3a494a") : android.graphics.Color.parseColor("#171f33")));
-                    
-                    LinearLayout barWrapper = new LinearLayout(this);
-                    LinearLayout.LayoutParams wrapperParams = new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f);
-                    barWrapper.setLayoutParams(wrapperParams);
-                    barWrapper.setGravity(android.view.Gravity.BOTTOM | android.view.Gravity.CENTER_HORIZONTAL);
-                    barWrapper.addView(bar);
-                    container.addView(barWrapper);
-                    
-                    // Label
-                    TextView label = new TextView(this);
-                    LinearLayout.LayoutParams labelParams = new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
-                    label.setLayoutParams(labelParams);
-                    label.setGravity(android.view.Gravity.CENTER);
-                    label.setText(dayName);
-                    label.setTextSize(12f);
-                    label.setTextColor(isToday ? android.graphics.Color.WHITE : android.graphics.Color.parseColor("#849495"));
-                    if (isToday) label.setTypeface(null, android.graphics.Typeface.BOLD);
-                    labels.addView(label);
-                }
-                
+                    if (stressChart != null) {
+                        stressChart.setData(chartValues, chartLabels);
+                    }
+                });
             } catch (Exception e) {
                 e.printStackTrace();
             }
-        }
+        });
     }
 
     private void configurePlayerScreen(View content) {
         TextView refreshButton = content.findViewById(R.id.playerAiRecButton);
         if (refreshButton != null) {
-            refreshButton.setOnClickListener(v -> generateRecommendations());
+            refreshButton.setOnClickListener(v -> generateRecommendations(true));
         }
         
-        generateRecommendations();
+        generateRecommendations(false);
     }
 
-    private void generateRecommendations() {
+    private void generateRecommendations(boolean forceRefresh) {
         if (currentContent == null || !SCREEN_PLAYER.equals(currentScreen)) return;
         
         TextView subtitle = currentContent.findViewById(R.id.recommendationSubtitle);
@@ -786,8 +1019,7 @@ public class MainActivity extends AppCompatActivity {
             return;
         }
 
-        BiometricClassifier.MoodPrediction prediction = biometricClassifier.predictMood(bpm, steps);
-        String stressLevel = prediction.mood;
+        String stressLevel = currentMoodLabel;
         String moodQuery = "pop";
         if (stressLevel.equals("Stressed")) moodQuery = "relaxing chill";
         else if (stressLevel.equals("Relaxed") || stressLevel.equals("Calm")) moodQuery = "acoustic soft";
@@ -797,166 +1029,60 @@ public class MainActivity extends AppCompatActivity {
         String prefType = prefs.getString("prefMusicType", "").trim();
 
         String finalStressLevel = stressLevel;
+        
+        // --- NEW LOGIC: Only fetch if forced or mood changed ---
+        if (!forceRefresh && RecommendationEngine.cachedRecommendations != null && !RecommendationEngine.cachedRecommendations.isEmpty() && finalStressLevel.equals(lastRecommendedMood)) {
+            renderRecommendations(RecommendationEngine.cachedRecommendations, finalStressLevel, prefLanguage);
+            return;
+        }
+        // -------------------------------------------------------
+
+        lastRecommendedMood = finalStressLevel;
         if (subtitle != null) subtitle.setText("Curating " + finalStressLevel + " recommendations...");
         
         // Use a broader query for iTunes to ensure we get results (iTunes 'term' acts as strict AND)
-        String firstGenre = prefGenres.contains(",") ? prefGenres.split(",")[0] : prefGenres;
-        String searchQuery = firstGenre.isEmpty() ? moodQuery : moodQuery + " " + firstGenre;
         
-        fetchItunesSongs(searchQuery, finalStressLevel, prefGenres, prefLanguage, prefArtists, prefType);
-    }
-    
-    private void fetchItunesSongs(String moodQuery, String stressLevel, String prefGenres, String prefLanguage, String prefArtists, String prefType) {
         ProgressBar loading = currentContent.findViewById(R.id.recommendationLoading);
-        if (loading != null) loading.setVisibility(View.VISIBLE);
-        LinearLayout container = currentContent.findViewById(R.id.playerPlaylistContainer);
-        if (container != null) container.removeAllViews();
+        if (loading != null) loading.setVisibility(android.view.View.VISIBLE);
         
-        imageExecutor.execute(() -> {
-            try {
-                String firstLang = prefLanguage.contains(",") ? prefLanguage.split(",")[0].trim() : prefLanguage.trim();
-                String firstGenre = prefGenres.contains(",") ? prefGenres.split(",")[0].trim() : prefGenres.trim();
-                String firstArtist = prefArtists.contains(",") ? prefArtists.split(",")[0].trim() : prefArtists.trim();
-                
-                // Read learned preferences from History
-                SharedPreferences prefsHistory = getSharedPreferences("MusicZPrefs", MODE_PRIVATE);
-                org.json.JSONObject freqMap = new org.json.JSONObject();
-                try {
-                    freqMap = new org.json.JSONObject(prefsHistory.getString("user_learned_preferences", "{}"));
-                } catch (Exception ignored) {}
-                
-                final org.json.JSONObject finalFreqMap = freqMap;
-                java.util.Comparator<String> prefSorter = (a, b) -> Integer.compare(finalFreqMap.optInt(b.trim(), 0), finalFreqMap.optInt(a.trim(), 0));
-                
-                List<String> userLangs = new ArrayList<>(prefLanguage.isEmpty() ? java.util.Collections.singletonList("") : Arrays.asList(prefLanguage.split(",")));
-                List<String> userArtists = new ArrayList<>(prefArtists.isEmpty() ? java.util.Collections.singletonList("") : Arrays.asList(prefArtists.split(",")));
-                List<String> userGenres = new ArrayList<>(prefGenres.isEmpty() ? java.util.Collections.singletonList("") : Arrays.asList(prefGenres.split(",")));
+        View diagOverlay = findViewById(R.id.diagnosticsOverlay);
+        if (diagOverlay != null && diagOverlay.getVisibility() == View.VISIBLE) {
+            ProgressBar diagLoading = findViewById(R.id.diagnosticsLoading);
+            if (diagLoading != null) diagLoading.setVisibility(View.VISIBLE);
+            TextView bText = findViewById(R.id.diagnosticsBalanceText);
+            TextView sText = findViewById(R.id.diagnosticsScoresText);
+            if (bText != null) bText.setText("Generating recommendations...");
+            if (sText != null) sText.setText("");
+        }
 
-                // Sort based on historical clicks (Personalization Layer)
-                java.util.Collections.sort(userLangs, prefSorter);
-                java.util.Collections.sort(userGenres, prefSorter);
-
-                List<org.json.JSONObject> allSongs = new ArrayList<>();
-                
-                for (String artist : userArtists) {
-                    String a = artist.trim();
-                    java.util.Set<String> uniqueQueries = new java.util.LinkedHashSet<>();
-                    
-                    for (String lang : userLangs) {
-                        String l = lang.trim();
-                        for (String genre : userGenres) {
-                            String g = genre.trim();
-
-                            if (!a.isEmpty() && !l.isEmpty()) {
-                                uniqueQueries.add((l + " " + a + " " + g + " " + moodQuery).trim());
-                                uniqueQueries.add((l + " " + a + " " + g).trim());
-                                uniqueQueries.add((l + " " + a + " " + moodQuery).trim());
-                                uniqueQueries.add((l + " " + a).trim());
-                            } else if (!a.isEmpty()) {
-                                uniqueQueries.add((a + " " + g + " " + moodQuery).trim());
-                                uniqueQueries.add((a + " " + g).trim());
-                                uniqueQueries.add((a + " " + moodQuery).trim());
-                                uniqueQueries.add(a);
-                            } else if (!l.isEmpty()) {
-                                uniqueQueries.add((l + " " + g + " " + moodQuery).trim());
-                                uniqueQueries.add((l + " " + g).trim());
-                                uniqueQueries.add((l + " " + moodQuery).trim());
-                                uniqueQueries.add(l);
-                            } else {
-                                uniqueQueries.add((g + " " + moodQuery).trim());
-                                uniqueQueries.add(g);
-                            }
-                        }
-                    }
-                    
-                    if (a.isEmpty() && prefLanguage.trim().isEmpty()) {
-                        uniqueQueries.add("music");
-                    }
-
-                    int songsForThisArtist = 0;
-                    for (String q : uniqueQueries) {
-                        if (q.trim().isEmpty()) continue;
-                        
-                        String encodedQuery = java.net.URLEncoder.encode(q, "UTF-8");
-                        URL url = new URL("https://itunes.apple.com/search?term=" + encodedQuery + "&entity=song&limit=25");
-                        HttpURLConnection conn = (HttpURLConnection) url.openConnection();
-                        conn.setRequestMethod("GET");
-                        BufferedReader in = new BufferedReader(new InputStreamReader(conn.getInputStream()));
-                        StringBuilder response = new StringBuilder();
-                        String line;
-                        while ((line = in.readLine()) != null) response.append(line);
-                        in.close();
-
-                        org.json.JSONObject jsonResponse = new org.json.JSONObject(response.toString());
-                        org.json.JSONArray results = jsonResponse.getJSONArray("results");
-                        
-                        if (results.length() > 0) {
-                            for (int i = 0; i < results.length(); i++) {
-                                allSongs.add(results.getJSONObject(i));
-                            }
-                            songsForThisArtist += results.length();
-                        }
-                        
-                        // We fetched enough songs for this artist, move to the next artist
-                        if (songsForThisArtist >= 15) {
-                            break; 
-                        }
-                    }
-                }
-                
-                List<org.json.JSONObject> filteredSongs = new ArrayList<>();
-                List<String> finalUserGenres = Arrays.asList(prefGenres.toLowerCase().split(","));
-                List<String> finalUserArtists = Arrays.asList(prefArtists.toLowerCase().split(","));
-
-                // Level 0: Strict Match (Artist AND Genre)
-                for (org.json.JSONObject song : allSongs) {
-                    String trackArtist = song.optString("artistName", "").toLowerCase();
-                    String trackGenre = song.optString("primaryGenreName", "").toLowerCase();
-                    
-                    boolean artistMatch = prefArtists.trim().isEmpty() || finalUserArtists.stream().map(String::trim).anyMatch(trackArtist::contains);
-                    boolean genreMatch = prefGenres.trim().isEmpty() || finalUserGenres.stream().map(String::trim).anyMatch(trackGenre::contains);
-                    
-                    if (artistMatch && genreMatch) {
-                        if (!filteredSongs.contains(song)) filteredSongs.add(song);
-                    }
-                }
-
-                // Level 1: If strictly matching both yields < 20, we can relax Genre slightly, 
-                // BUT WE NEVER RELAX ARTIST. Artist must always match!
-                if (filteredSongs.size() < 20) {
-                    for (org.json.JSONObject song : allSongs) {
-                        if (!filteredSongs.contains(song)) {
-                            String trackArtist = song.optString("artistName", "").toLowerCase();
-                            boolean artistMatch = prefArtists.trim().isEmpty() || finalUserArtists.stream().map(String::trim).anyMatch(trackArtist::contains);
-                            
-                            // If artist matches, we accept it regardless of genre mismatch
-                            if (artistMatch) {
-                                filteredSongs.add(song);
-                            }
-                        }
-                    }
-                }
-
-                // Dedup and shuffle
-                java.util.Collections.shuffle(filteredSongs);
-                int count = Math.min(20, filteredSongs.size());
-                
-                List<org.json.JSONObject> finalSongs = count > 0 ? new ArrayList<>(filteredSongs.subList(0, count)) : new ArrayList<>();
-
-                handler.post(() -> renderRecommendations(finalSongs, stressLevel, prefGenres, prefLanguage, prefArtists));
-            } catch (Exception e) {
-                e.printStackTrace();
+        RecommendationEngine.fetchAndRank(this, finalStressLevel, prefLanguage, prefGenres, prefArtists, new RecommendationEngine.RecommendationCallback() {
+            @Override
+            public void onSuccess(List<RecommendationEngine.RankedSong> recommendations) {
                 handler.post(() -> {
-                    if (loading != null) loading.setVisibility(View.GONE);
-                    Toast.makeText(MainActivity.this, "Failed to fetch songs.", Toast.LENGTH_SHORT).show();
+                    renderRecommendations(recommendations, finalStressLevel, prefLanguage);
+                    refreshDiagnosticsUI();
+                });
+            }
+
+            @Override
+            public void onFailure(String error, List<RecommendationEngine.RankedSong> cachedRecommendations) {
+                handler.post(() -> {
+                    android.widget.Toast.makeText(MainActivity.this, error, android.widget.Toast.LENGTH_SHORT).show();
+                    if (cachedRecommendations != null && !cachedRecommendations.isEmpty()) {
+                        renderRecommendations(cachedRecommendations, finalStressLevel, prefLanguage);
+                    } else {
+                        if (loading != null) loading.setVisibility(android.view.View.GONE);
+                    }
+                    refreshDiagnosticsUI();
                 });
             }
         });
     }
+    
 
 
 
-    private void renderRecommendations(List<org.json.JSONObject> songs, String stressLevel, String genrePref, String langPref, String artistPref) {
+    private void renderRecommendations(List<RecommendationEngine.RankedSong> songs, String stressLevel, String langPref) {
         if (currentContent == null || !SCREEN_PLAYER.equals(currentScreen)) return;
         
         ProgressBar loading = currentContent.findViewById(R.id.recommendationLoading);
@@ -971,43 +1097,49 @@ public class MainActivity extends AppCompatActivity {
         
         if (songs.isEmpty()) {
             TextView emptyView = new TextView(this);
-            emptyView.setText("No songs found. Please change your preference settings due to a wrong/mismatched combination.");
+            emptyView.setText("No songs found. Please change your preference settings.");
             emptyView.setTextColor(android.graphics.Color.WHITE);
             emptyView.setGravity(android.view.Gravity.CENTER);
             emptyView.setPadding(0, 50, 0, 50);
             container.addView(emptyView);
-            
-            if (subtitle != null) subtitle.setText("Found 0 matches. Settings conflict detected.");
             return;
         }
 
-        for (org.json.JSONObject song : songs) {
+        for (RecommendationEngine.RankedSong song : songs) {
             try {
                 View itemView = LayoutInflater.from(this).inflate(R.layout.item_recommendation, container, false);
                 
-                String trackName = song.optString("trackName", "Unknown Song");
-                String artistName = song.optString("artistName", "Unknown Artist");
-                String genre = song.optString("primaryGenreName", "Unknown");
-                String artworkUrl = song.optString("artworkUrl100", "");
-                String trackId = String.valueOf(song.optLong("trackId"));
-
-                setTextIfPresent(itemView, R.id.itemSongName, trackName);
-                setTextIfPresent(itemView, R.id.itemArtistName, artistName);
-                setTextIfPresent(itemView, R.id.itemGenre, genre);
+                setTextIfPresent(itemView, R.id.itemSongName, song.trackName);
+                setTextIfPresent(itemView, R.id.itemArtistName, song.artistName);
+                setTextIfPresent(itemView, R.id.itemGenre, song.genre);
                 setTextIfPresent(itemView, R.id.itemLanguage, langPref.isEmpty() ? "Global" : langPref);
+                setTextIfPresent(itemView, R.id.itemReason, song.explanation);
+                setTextIfPresent(itemView, R.id.itemMatchScore, song.finalScore + "% Match");
                 
-                String reason = "Recommended because your stress level is " + stressLevel.toLowerCase() + " and it matches your preferred " + (!langPref.isEmpty() ? langPref + " " : "") + (!genrePref.isEmpty() ? genrePref : "music") + ".";
-                setTextIfPresent(itemView, R.id.itemReason, reason);
+                TextView matchScoreView = itemView.findViewById(R.id.itemMatchScore);
+                if (matchScoreView != null) {
+                    if (song.finalScore >= 90) matchScoreView.setTextColor(android.graphics.Color.parseColor("#a5d6a7"));
+                    else if (song.finalScore >= 70) matchScoreView.setTextColor(android.graphics.Color.parseColor("#fff59d"));
+                    else matchScoreView.setTextColor(android.graphics.Color.parseColor("#ffcc80"));
+                }
 
-                ImageView albumArt = itemView.findViewById(R.id.itemAlbumArt);
-                if (albumArt != null && !artworkUrl.isEmpty()) {
-                    loadImage(artworkUrl, albumArt);
+                TextView notInterested = itemView.findViewById(R.id.itemNotInterested);
+                if (notInterested != null) {
+                    notInterested.setOnClickListener(v -> {
+                        container.removeView(itemView);
+                        android.widget.Toast.makeText(MainActivity.this, "We won't recommend this again.", android.widget.Toast.LENGTH_SHORT).show();
+                    });
+                }
+
+                android.widget.ImageView albumArt = itemView.findViewById(R.id.itemAlbumArt);
+                if (albumArt != null && !song.artworkUrl.isEmpty()) {
+                    loadImage(song.artworkUrl, albumArt);
                 }
 
                 String finalLang = langPref.isEmpty() ? "Global" : langPref;
                 itemView.setOnClickListener(v -> {
-                    logUserInteraction(genre, finalLang);
-                    resolveSpotifyTrack(trackId, trackName, artistName);
+                    logUserInteraction(song, finalLang);
+                    resolveMusicTrack(song.trackId, song.trackName, song.artistName);
                 });
                 container.addView(itemView);
             } catch (Exception e) {
@@ -1016,7 +1148,10 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    private void logUserInteraction(String genre, String lang) {
+    private void logUserInteraction(RecommendationEngine.RankedSong song, String lang) {
+        String genre = song.genre;
+        String artist = song.artistName;
+        
         SharedPreferences prefs = getSharedPreferences("MusicZPrefs", MODE_PRIVATE);
         try {
             org.json.JSONObject freqMap = new org.json.JSONObject(prefs.getString("user_learned_preferences", "{}"));
@@ -1026,70 +1161,62 @@ public class MainActivity extends AppCompatActivity {
             if (!lang.isEmpty() && !"Global".equals(lang)) {
                 freqMap.put(lang, freqMap.optInt(lang, 0) + 1);
             }
-            prefs.edit().putString("user_learned_preferences", freqMap.toString()).apply();
-        } catch (Exception e) { e.printStackTrace(); }
-    }
-
-    private void resolveSpotifyTrack(String itunesTrackId, String trackName, String artistName) {
-        Toast.makeText(this, "Opening exact track in Spotify...", Toast.LENGTH_SHORT).show();
-        imageExecutor.execute(() -> {
-            try {
-                URL url = new URL("https://api.song.link/v1-alpha.1/links?platform=itunes&type=song&id=" + itunesTrackId);
-                HttpURLConnection conn = (HttpURLConnection) url.openConnection();
-                conn.setRequestMethod("GET");
-                conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
-                conn.setConnectTimeout(5000);
-                conn.setReadTimeout(5000);
-
-                int responseCode = conn.getResponseCode();
-                if (responseCode != 200) {
-                    handler.post(() -> fallbackToSpotifySearchIntent(trackName, artistName));
-                    return;
-                }
-
-                BufferedReader in = new BufferedReader(new InputStreamReader(conn.getInputStream()));
-                StringBuilder response = new StringBuilder();
-                String line;
-                while ((line = in.readLine()) != null) response.append(line);
-                in.close();
-
-                org.json.JSONObject jsonResponse = new org.json.JSONObject(response.toString());
-                org.json.JSONObject links = jsonResponse.optJSONObject("linksByPlatform");
-                if (links != null && links.has("spotify")) {
-                    org.json.JSONObject spotify = links.getJSONObject("spotify");
-                    String spotifyUrl = spotify.optString("url");
-                    if (spotifyUrl != null && !spotifyUrl.isEmpty()) {
-                        handler.post(() -> {
-                            Intent intent = new Intent(Intent.ACTION_VIEW, android.net.Uri.parse(spotifyUrl));
-                            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-                            try {
-                                startActivity(intent);
-                            } catch (Exception e) {
-                                fallbackToSpotifySearchIntent(trackName, artistName);
-                            }
-                        });
-                        return;
-                    }
-                }
-                
-                handler.post(() -> fallbackToSpotifySearchIntent(trackName, artistName));
-            } catch (Exception e) {
-                e.printStackTrace();
-                handler.post(() -> fallbackToSpotifySearchIntent(trackName, artistName));
+            if (!artist.isEmpty() && !"Unknown Artist".equals(artist)) {
+                freqMap.put("artist_" + artist.toLowerCase(), freqMap.optInt("artist_" + artist.toLowerCase(), 0) + 1);
             }
-        });
+            prefs.edit().putString("user_learned_preferences", freqMap.toString()).apply();
+            
+            // Save to Room DB
+            dbExecutor.execute(() -> {
+                try {
+                    com.example.genzmusicapp.db.AppDatabase db = com.example.genzmusicapp.db.AppDatabase.getDatabase(this);
+                    com.example.genzmusicapp.db.SongHistory sh = db.songDao().getSong(song.trackId);
+                    if (sh == null) {
+                        sh = new com.example.genzmusicapp.db.SongHistory();
+                        sh.trackId = song.trackId;
+                        sh.trackName = song.trackName;
+                        sh.artistName = song.artistName;
+                        sh.genre = song.genre;
+                        sh.playCount = 0;
+                        sh.userFeedback = 0;
+                    }
+                    sh.playCount += 1;
+                    sh.lastPlayedTimestamp = System.currentTimeMillis();
+                    db.songDao().insertOrUpdate(sh);
+                } catch (Exception ignored) {}
+            });
+            
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
     }
 
-    private void fallbackToSpotifySearchIntent(String trackName, String artistName) {
+    private void resolveMusicTrack(String itunesTrackId, String trackName, String artistName) {
         try {
-            Intent intent = new Intent(android.provider.MediaStore.INTENT_ACTION_MEDIA_PLAY_FROM_SEARCH);
-            intent.putExtra(android.provider.MediaStore.EXTRA_MEDIA_FOCUS, "vnd.android.cursor.item/audio");
+            SharedPreferences prefs = getSharedPreferences("MusicZPrefs", MODE_PRIVATE);
+            String preferredApp = prefs.getString("prefMusicApp", "");
+
+            android.content.Intent intent = new android.content.Intent(android.provider.MediaStore.INTENT_ACTION_MEDIA_PLAY_FROM_SEARCH);
+            if (!preferredApp.isEmpty()) {
+                intent.setPackage(preferredApp);
+            }
+            
             intent.putExtra(android.app.SearchManager.QUERY, trackName + " " + artistName);
-            intent.setPackage("com.spotify.music");
-            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            intent.putExtra(android.provider.MediaStore.EXTRA_MEDIA_FOCUS, "vnd.android.cursor.item/audio");
+            intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK);
             startActivity(intent);
+        } catch (android.content.ActivityNotFoundException e) {
+            // Fallback to youtube search if no app handles the intent
+            try {
+                String query = java.net.URLEncoder.encode(trackName + " " + artistName, "UTF-8");
+                android.content.Intent browserIntent = new android.content.Intent(android.content.Intent.ACTION_VIEW, 
+                        android.net.Uri.parse("https://www.youtube.com/results?search_query=" + query));
+                startActivity(browserIntent);
+            } catch (Exception ex) {
+                Toast.makeText(this, "Could not open music app.", Toast.LENGTH_SHORT).show();
+            }
         } catch (Exception e) {
-            Toast.makeText(this, "Failed to launch Spotify. Please ensure the app is installed.", Toast.LENGTH_LONG).show();
+            e.printStackTrace();
         }
     }
 
@@ -1100,6 +1227,7 @@ public class MainActivity extends AppCompatActivity {
             case SCREEN_PLAYER:
                 return PLAYER_AVATAR_URL;
             case SCREEN_SETTINGS:
+            case SCREEN_WELLNESS:
                 return WELLNESS_AVATAR_URL;
             case SCREEN_HOME:
             default:
@@ -1111,13 +1239,14 @@ public class MainActivity extends AppCompatActivity {
         boolean showNav = SCREEN_HOME.equals(screen)
                 || SCREEN_LIVE.equals(screen)
                 || SCREEN_PLAYER.equals(screen)
-                || SCREEN_SETTINGS.equals(screen);
+                || SCREEN_SETTINGS.equals(screen)
+                || SCREEN_WELLNESS.equals(screen);
         bottomNav.setVisibility(showNav ? View.VISIBLE : View.GONE);
 
         setNavSelected(R.id.navHome, SCREEN_HOME.equals(screen));
         setNavSelected(R.id.navLive, SCREEN_LIVE.equals(screen));
         setNavSelected(R.id.navPlayer, SCREEN_PLAYER.equals(screen));
-        setNavSelected(R.id.navWellness, SCREEN_SETTINGS.equals(screen));
+        setNavSelected(R.id.navWellness, SCREEN_WELLNESS.equals(screen));
     }
 
     private void setNavSelected(int navId, boolean selected) {
@@ -1191,7 +1320,9 @@ public class MainActivity extends AppCompatActivity {
         }
 
         bleScanning = true;
-        closeWatchGatt();
+        if (isServiceBound && bluetoothService != null) {
+            bluetoothService.disconnectAndStop();
+        }
         clearBleDeviceList();
         updateBleStatus("Scanning nearby BLE watches. Tap your watch when it appears.");
         addBondedBleDevices();
@@ -1309,224 +1440,11 @@ public class MainActivity extends AppCompatActivity {
         selectedBleDeviceLabel = candidate.name;
         stopBleScan();
         updateBleStatus("Connecting to " + selectedBleDeviceLabel + "...");
-        connectGattDevice(candidate.device);
-    }
-
-    @SuppressLint("MissingPermission")
-    private void connectGattDevice(BluetoothDevice device) {
-        if (!hasBleConnectPermission()) {
-            updateBleStatus("Bluetooth connect permission is missing.");
-            return;
-        }
-
-        closeWatchGatt();
-        watchGatt = device.connectGatt(this, false, watchGattCallback, BluetoothDevice.TRANSPORT_LE);
-    }
-
-    @SuppressLint("MissingPermission")
-    private void enableLiveNotifications(
-            BluetoothGatt gatt,
-            BluetoothGattCharacteristic notifyCharacteristic) {
-        if (!hasBleConnectPermission()) {
-            updateBleStatus("Bluetooth connect permission is missing.");
-            return;
-        }
-
-        int properties = notifyCharacteristic.getProperties();
-        boolean supportsNotify = (properties & BluetoothGattCharacteristic.PROPERTY_NOTIFY) != 0;
-        boolean supportsIndicate = (properties & BluetoothGattCharacteristic.PROPERTY_INDICATE) != 0;
-        if (!supportsNotify && !supportsIndicate) {
-            updateBleStatus("Live channel " + shortUuid(notifyCharacteristic.getUuid())
-                    + " does not support notifications.");
-            return;
-        }
-
-        boolean enabled = gatt.setCharacteristicNotification(notifyCharacteristic, true);
-        BluetoothGattDescriptor descriptor = notifyCharacteristic.getDescriptor(BLE_CCCD_UUID);
-        if (!enabled || descriptor == null) {
-            updateBleStatus("Could not enable notifications on "
-                    + shortUuid(notifyCharacteristic.getUuid()) + ".");
-            return;
-        }
-
-        descriptor.setValue(supportsIndicate
-                ? BluetoothGattDescriptor.ENABLE_INDICATION_VALUE
-                : BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE);
-        boolean writeStarted = gatt.writeDescriptor(descriptor);
-        updateBleStatus(writeStarted
-                ? "Subscribed to " + shortUuid(notifyCharacteristic.getUuid())
-                        + " on " + selectedBleDeviceLabel + ". Waiting for data..."
-                : "Could not write notification descriptor.");
-    }
-
-    @SuppressLint("MissingPermission")
-    private void closeWatchGatt() {
-        if (watchGatt == null || !hasBleConnectPermission()) {
-            watchGatt = null;
-            return;
-        }
-
-        watchGatt.disconnect();
-        watchGatt.close();
-        watchGatt = null;
-    }
-
-    private void handleLiveCharacteristic(UUID characteristicUuid, byte[] value) {
-        if (BLE_STANDARD_HEART_RATE_MEASUREMENT_UUID.equals(characteristicUuid)) {
-            decodeStandardHeartRatePacket(value);
-            return;
-        }
-
-        if (BLE_CUSTOM_NOTIFY_CHARACTERISTIC_UUID.equals(characteristicUuid) || looksLikeCustomLivePacket(value)) {
-            decodeCustomLiveWatchPacket(value);
-        }
-    }
-
-    private BluetoothGattCharacteristic findFirstNotifyCharacteristic(BluetoothGatt gatt) {
-        List<BluetoothGattService> services = gatt.getServices();
-        if (services == null) {
-            return null;
-        }
-
-        for (BluetoothGattService service : services) {
-            List<BluetoothGattCharacteristic> characteristics = service.getCharacteristics();
-            if (characteristics == null) {
-                continue;
-            }
-
-            for (BluetoothGattCharacteristic characteristic : characteristics) {
-                int properties = characteristic.getProperties();
-                boolean canNotify = (properties & BluetoothGattCharacteristic.PROPERTY_NOTIFY) != 0
-                        || (properties & BluetoothGattCharacteristic.PROPERTY_INDICATE) != 0;
-                if (canNotify && characteristic.getDescriptor(BLE_CCCD_UUID) != null) {
-                    return characteristic;
-                }
-            }
-        }
-
-        return null;
-    }
-
-    private boolean looksLikeCustomLivePacket(byte[] value) {
-        return value != null && value.length >= 2 && (value[0] & 0xFF) == 0xBC;
-    }
-
-    private String shortUuid(UUID uuid) {
-        String uuidText = uuid.toString();
-        if (uuidText.startsWith("0000") && uuidText.endsWith("-0000-1000-8000-00805f9b34fb")) {
-            return uuidText.substring(4, 8).toUpperCase();
-        }
-        return uuidText.substring(0, 8);
-    }
-
-    private void decodeStandardHeartRatePacket(byte[] value) {
-        if (value == null || value.length < 2) {
-            return;
-        }
-
-        int flags = value[0] & 0xFF;
-        int bpm = (flags & 0x01) == 0
-                ? value[1] & 0xFF
-                : unsignedLittleEndianShort(value, 1);
-        updateLiveBpm(bpm);
-    }
-
-    private void decodeCustomLiveWatchPacket(byte[] value) {
-        if (value == null || value.length < 5 || (value[0] & 0xFF) != 0xBC) {
-            return;
-        }
-
-        int packetType = value[1] & 0xFF;
-        
-        // Debug logging for verified packets
-        StringBuilder hexString = new StringBuilder();
-        for (byte b : value) {
-            hexString.append(String.format("%02X ", b));
-        }
-        android.util.Log.d("MoodSyncBLE", "Decoded Custom Packet [Type: " + String.format("%02X", packetType) + "]: " + hexString.toString().trim());
-
-        if (packetType == 0x5C && value.length >= 5) {
-            int bpm = value[4] & 0xFF;
-            updateLiveBpm(bpm);
-            return;
-        }
-
-        if (packetType == 0x51 && value.length >= 8) {
-            Long steps = extractCustomStepCount(value);
-            if (steps != null) {
-                updateLiveSteps(steps, packetType);
-            } else {
-                updateBleStatus("Step packet received, but step bytes could not be decoded. Ignoring to prevent random jumps.");
-            }
-        } else if (packetType != 0x5C && packetType != 0x51) {
-            android.util.Log.w("MoodSyncBLE", "Ignored unrecognized packet type: " + String.format("%02X", packetType));
-        }
-    }
-
-    private void updateLiveBpm(int bpm) {
-        if (bpm < 30 || bpm > 220) {
-            return;
-        }
-
-        long steps = parseLongSafe(latestHealthSnapshot.stepsText);
-        latestHealthSnapshot = latestHealthSnapshot.withBpm(String.valueOf(bpm));
-        latestHealthSnapshot = latestHealthSnapshot.withWellnessScore(
-                String.valueOf(calculateWellnessScore(bpm, steps)));
-        updateBleStatus("Live BLE from " + selectedBleDeviceLabel + ": " + bpm + " BPM");
-        handler.post(() -> applyHealthSnapshot(currentContent));
-    }
-
-    private void updateLiveSteps(long steps, int packetType) {
-        if (steps < 0L || steps > 300000L) {
-            return;
-        }
-
-        latestHealthSnapshot = latestHealthSnapshot.withSteps(String.valueOf(steps));
-        latestHealthSnapshot = latestHealthSnapshot.withWellnessScore(
-                String.valueOf(calculateWellnessScore(parseLongSafe(latestHealthSnapshot.bpmText), steps)));
-        updateBleStatus("Live BLE from " + selectedBleDeviceLabel + ": "
-                + formatNumber(steps) + " steps"
-                + " (packet " + Integer.toHexString(packetType).toUpperCase(Locale.US) + ")");
-        handler.post(() -> applyHealthSnapshot(currentContent));
-    }
-
-    private Long extractCustomStepCount(byte[] value) {
-        long currentSteps = parseLongSafe(latestHealthSnapshot.stepsText);
-        
-        // Strict parsing requirement: Do not estimate or search.
-        // We strictly expect steps to be at offset 4 in a 0x51 packet as a little endian Int.
-        if (value.length >= 8) {
-            long directSteps = unsignedLittleEndianInt(value, 4);
-            if (isPlausibleStepCount(directSteps, currentSteps)) {
-                return directSteps;
-            }
-        }
-
-        // Do not search other offsets. This prevents random bytes from triggering step jumps.
-        return null;
-    }
-
-    private boolean isPlausibleStepCount(long candidate, long currentSteps) {
-        if (candidate < 0L || candidate > 300000L) {
-            return false;
-        }
-
-        return currentSteps == 0L || candidate >= currentSteps || candidate < 1000L;
-    }
-
-    private int unsignedLittleEndianShort(byte[] value, int offset) {
-        if (value.length <= offset + 1) {
-            return 0;
-        }
-
-        return (value[offset] & 0xFF) | ((value[offset + 1] & 0xFF) << 8);
-    }
-
-    private long unsignedLittleEndianInt(byte[] value, int offset) {
-        return ((long) value[offset] & 0xFF)
-                | (((long) value[offset + 1] & 0xFF) << 8)
-                | (((long) value[offset + 2] & 0xFF) << 16)
-                | (((long) value[offset + 3] & 0xFF) << 24);
+        Intent serviceIntent = new Intent(this, BluetoothForegroundService.class);
+        serviceIntent.putExtra("MAC_ADDRESS", candidate.device.getAddress());
+        serviceIntent.putExtra("DEVICE_NAME", candidate.name);
+        ContextCompat.startForegroundService(this, serviceIntent);
+        bindService(serviceIntent, serviceConnection, Context.BIND_AUTO_CREATE);
     }
 
     private long parseLongSafe(String value) {
@@ -1578,14 +1496,10 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void renderBleDeviceList(View root) {
-        if (root == null) {
-            return;
-        }
+        if (root == null) return;
 
-        LinearLayout deviceList = root.findViewById(R.id.bleDeviceList);
-        if (deviceList == null) {
-            return;
-        }
+        TextView deviceSelector = root.findViewById(R.id.bleDeviceSelector);
+        if (deviceSelector == null) return;
 
         List<BleDeviceCandidate> candidates;
         synchronized (discoveredBleDevices) {
@@ -1599,22 +1513,72 @@ public class MainActivity extends AppCompatActivity {
                         candidate.lastSeenMillis).reversed())
                 .thenComparing(Comparator.comparingInt((BleDeviceCandidate candidate) -> candidate.rssi).reversed()));
 
-        deviceList.removeAllViews();
         if (candidates.isEmpty()) {
-            deviceList.setVisibility(bleScanning ? View.VISIBLE : View.GONE);
             if (bleScanning) {
-                deviceList.addView(createBleInfoRow("Searching for nearby BLE watches..."));
+                deviceSelector.setText("Searching for nearby BLE watches...");
+                deviceSelector.setVisibility(View.VISIBLE);
+                deviceSelector.setOnClickListener(null);
+            } else {
+                deviceSelector.setVisibility(View.GONE);
             }
-            return;
-        }
+        } else {
+            deviceSelector.setVisibility(View.VISIBLE);
+            deviceSelector.setText("Select a device (" + candidates.size() + " found) ▾");
+            
+            deviceSelector.setOnClickListener(v -> {
+                com.google.android.material.bottomsheet.BottomSheetDialog bottomSheetDialog = 
+                    new com.google.android.material.bottomsheet.BottomSheetDialog(this);
+                
+                // Create a container layout
+                LinearLayout bottomSheetView = new LinearLayout(this);
+                bottomSheetView.setOrientation(LinearLayout.VERTICAL);
+                bottomSheetView.setBackgroundResource(R.drawable.glass_panel_rounded_32);
+                bottomSheetView.setPadding(dp(20), dp(20), dp(20), dp(20));
 
-        deviceList.setVisibility(View.VISIBLE);
-        int limit = Math.min(candidates.size(), 40);
-        for (int i = 0; i < limit; i++) {
-            BleDeviceCandidate candidate = candidates.get(i);
-            TextView row = createBleInfoRow(candidate.displayText());
-            row.setOnClickListener(view -> connectSelectedBleDevice(candidate));
-            deviceList.addView(row);
+                TextView title = new TextView(this);
+                title.setText("Select Bluetooth Device");
+                title.setTextColor(ContextCompat.getColor(this, R.color.mood_cyan));
+                title.setTextSize(18);
+                title.setTypeface(null, android.graphics.Typeface.BOLD);
+                title.setPadding(0, 0, 0, dp(16));
+                bottomSheetView.addView(title);
+
+                android.widget.ScrollView scrollView = new android.widget.ScrollView(this);
+                LinearLayout listContainer = new LinearLayout(this);
+                listContainer.setOrientation(LinearLayout.VERTICAL);
+
+                int limit = Math.min(candidates.size(), 40);
+                for (int i = 0; i < limit; i++) {
+                    BleDeviceCandidate candidate = candidates.get(i);
+                    TextView row = createBleInfoRow(candidate.displayText());
+                    row.setOnClickListener(view -> {
+                        bottomSheetDialog.dismiss();
+                        deviceSelector.setText(candidate.name + " selected ▾");
+                        connectSelectedBleDevice(candidate);
+                    });
+                    listContainer.addView(row);
+                }
+
+                scrollView.addView(listContainer);
+                
+                // Set max height for ScrollView so it doesn't cover the whole screen if there are 40 devices
+                LinearLayout.LayoutParams scrollParams = new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT, 
+                    dp(400)
+                );
+                scrollView.setLayoutParams(scrollParams);
+                
+                bottomSheetView.addView(scrollView);
+                bottomSheetDialog.setContentView(bottomSheetView);
+                
+                // Set background of bottom sheet itself to transparent so our custom rounded corners show
+                View parent = (View) bottomSheetView.getParent();
+                if (parent != null) {
+                    parent.setBackgroundColor(android.graphics.Color.TRANSPARENT);
+                }
+                
+                bottomSheetDialog.show();
+            });
         }
     }
 
@@ -1880,10 +1844,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private String inferStressLabel(long averageBpm, long steps) {
-        if (biometricClassifier != null && averageBpm > 0) {
-            return biometricClassifier.predictMood(averageBpm, steps).mood;
-        }
-        return "Unknown";
+        return currentMoodLabel;
     }
 
     private String formatNumber(long value) {
@@ -1906,26 +1867,41 @@ public class MainActivity extends AppCompatActivity {
         setTextIfPresent(root, R.id.homeStepsValue, latestHealthSnapshot.stepsText);
         setTextIfPresent(root, R.id.liveStepsValue, latestHealthSnapshot.stepsText);
         setTextIfPresent(root, R.id.homeWellnessScore, latestHealthSnapshot.wellnessScoreText);
-        setTextIfPresent(root, R.id.wellnessScoreValue, latestHealthSnapshot.wellnessScoreText + " / 100");
+        setTextIfPresent(root, R.id.tvEmotionalScoreValue, latestHealthSnapshot.wellnessScoreText + " / 100");
 
         long bpm = parseLongSafe(latestHealthSnapshot.bpmText);
         long steps = parseLongSafe(latestHealthSnapshot.stepsText);
         setTextIfPresent(root, R.id.liveMoodText, calculateLiveMood(bpm, steps));
+        
+        PulseScannerView pulseScanner = root.findViewById(R.id.pulseScanner);
+        if (pulseScanner != null && bpm > 0) {
+            pulseScanner.setBpm((int) bpm);
+        }
+        
+        // Save to Room DB
+        if (bpm > 0) {
+            long score = calculateWellnessScore(bpm, steps);
+            dbExecutor.execute(() -> {
+                try {
+                    com.example.genzmusicapp.db.AppDatabase db = com.example.genzmusicapp.db.AppDatabase.getDatabase(this);
+                    com.example.genzmusicapp.db.WellnessHistory wh = new com.example.genzmusicapp.db.WellnessHistory();
+                    wh.bpm = bpm;
+                    wh.steps = steps;
+                    wh.calculatedScore = score;
+                    wh.calculatedMood = currentMoodLabel;
+                    wh.timestamp = System.currentTimeMillis();
+                    db.wellnessDao().insert(wh);
+                } catch (Exception ignored) {}
+            });
+        }
     }
 
     private String calculateLiveMood(long bpm, long steps) {
         if (bpm <= 0) {
-            if (steps > 0) {
-                return "Activity logged: " + formatNumber(steps) + " steps. Awaiting live heart rate data for complete mood analysis.";
-            }
+            if (steps > 0) return "Activity logged: " + formatNumber(steps) + " steps. Awaiting live heart rate data...";
             return "Calibrating neural biosensors. Waiting for stable biometric readings...";
         }
-        
-        if (biometricClassifier != null) {
-            BiometricClassifier.MoodPrediction prediction = biometricClassifier.predictMood(bpm, steps);
-            return "Mood: " + prediction.mood + " (Confidence: " + prediction.confidencePercent + "%)";
-        }
-        return "Calculating live mood...";
+        return "Mood: " + currentMoodLabel;
     }
 
     private void setTextIfPresent(View root, int viewId, String text) {

@@ -198,6 +198,26 @@
                 android:textSize="14sp"
                 android:visibility="gone" />
 
+            <!-- Preferred Music App -->
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="20dp"
+                android:text="Preferred Music App"
+                android:textColor="@color/mood_cyan"
+                android:textSize="14sp"
+                android:textStyle="bold" />
+
+            <Spinner
+                android:id="@+id/spinnerMusicApp"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:background="@drawable/glass_panel"
+                android:padding="12dp"
+                android:popupBackground="@drawable/bg_app"
+                android:textColor="@color/mood_text" />
+
             <Button
                 android:id="@+id/saveSettingsButton"
                 android:layout_width="match_parent"

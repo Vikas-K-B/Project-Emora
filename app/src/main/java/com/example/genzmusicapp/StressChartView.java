@@ -10,8 +10,14 @@ import android.util.AttributeSet;
 import android.view.View;
 
 public class StressChartView extends View {
-    private static final String[] LABELS = {"Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"};
-    private final float[] values = {0.44f, 0.34f, 0.62f, 0.28f, 0.38f, 0.50f, 0.32f};
+    private String[] labels = {"Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"};
+    private float[] values = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
+
+    public void setData(float[] values, String[] labels) {
+        this.values = values;
+        this.labels = labels;
+        invalidate();
+    }
     private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
 
     public StressChartView(Context context) {
@@ -58,8 +64,8 @@ public class StressChartView extends View {
         paint.setTextAlign(Paint.Align.CENTER);
         paint.setFakeBoldText(true);
         paint.setTextSize(dp(13f));
-        for (int i = 0; i < LABELS.length; i++) {
-            canvas.drawText(LABELS[i], slot * i + slot / 2f, height - dp(8f), paint);
+        for (int i = 0; i < labels.length; i++) {
+            canvas.drawText(labels[i], slot * i + slot / 2f, height - dp(8f), paint);
         }
         paint.setFakeBoldText(false);
     }

@@ -19,199 +19,217 @@
             android:layout_height="wrap_content"
             android:orientation="vertical"
             android:paddingStart="24dp"
-            android:paddingTop="32dp"
+            android:paddingTop="24dp"
             android:paddingEnd="24dp"
             android:paddingBottom="116dp">
 
-            <!-- Watch Connect Button (Subtle) -->
-            <Button
-                android:id="@+id/wellnessConnectButton"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_gravity="center_horizontal"
-                android:layout_marginBottom="24dp"
-                android:background="@drawable/glass_panel"
-                android:minHeight="40dp"
-                android:paddingStart="24dp"
-                android:paddingEnd="24dp"
-                android:text="Sync Smartwatch"
-                android:textAllCaps="false"
-                android:textColor="@color/mood_cyan"
-                android:textSize="14sp" />
-
-            <!-- Emotional Stability Score Card -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:background="@drawable/glass_panel"
-                android:gravity="center_horizontal"
-                android:orientation="vertical"
-                android:padding="24dp">
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:layout_marginBottom="16dp">
+
+                <ImageButton
+                    android:id="@+id/backFromSettingsButton"
+                    android:layout_width="40dp"
+                    android:layout_height="40dp"
+                    android:background="?attr/selectableItemBackgroundBorderless"
+                    android:src="@android:drawable/ic_menu_revert"
+                    android:tint="@color/mood_cyan"
+                    android:contentDescription="Back" />
 
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:letterSpacing="0.1"
-                    android:text="EMOTIONAL STABILITY SCORE"
+                    android:layout_marginStart="8dp"
+                    android:fontFamily="sans-serif-black"
+                    android:text="NOTIFICATIONS"
                     android:textColor="@color/mood_text"
-                    android:textSize="12sp"
+                    android:textSize="32sp"
                     android:textStyle="bold" />
-
-                <LinearLayout
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="16dp"
-                    android:gravity="bottom"
-                    android:orientation="horizontal">
-
-                    <TextView
-                        android:id="@+id/stabilityScoreText"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:fontFamily="sans-serif-black"
-                        android:text="84"
-                        android:textColor="@color/mood_cyan_dim"
-                        android:textSize="56sp"
-                        android:textStyle="bold" />
-
-                    <TextView
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:layout_marginStart="8dp"
-                        android:text="/ 100"
-                        android:textColor="@color/mood_text"
-                        android:textSize="20sp" />
-                </LinearLayout>
-
-                <LinearLayout
-                    android:layout_width="wrap_content"
-                    android:layout_height="32dp"
-                    android:layout_marginTop="16dp"
-                    android:background="@drawable/chip_bg"
-                    android:gravity="center"
-                    android:orientation="horizontal"
-                    android:paddingStart="16dp"
-                    android:paddingEnd="16dp">
-
-                    <TextView
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="↗"
-                        android:textColor="@color/mood_cyan"
-                        android:textSize="14sp"
-                        android:textStyle="bold" />
-
-                    <TextView
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:layout_marginStart="8dp"
-                        android:text="+4% vs last week"
-                        android:textColor="@color/mood_cyan"
-                        android:textSize="12sp"
-                        android:textStyle="bold" />
-                </LinearLayout>
-
-                <TextView
-                    android:id="@+id/stabilityStatusText"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="40dp"
-                    android:fontFamily="sans-serif-medium"
-                    android:text="Stable"
-                    android:textColor="@color/white"
-                    android:textSize="24sp"
-                    android:textStyle="bold" />
-
-                <TextView
-                    android:id="@+id/stabilityZoneText"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="4dp"
-                    android:text="Optimal Zone"
-                    android:textColor="@color/mood_text_muted"
-                    android:textSize="14sp" />
             </LinearLayout>
 
-            <!-- Biometrics Card -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="16dp"
-                android:background="@drawable/glass_panel"
-                android:orientation="vertical"
-                android:padding="20dp">
-
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="LATEST BIOMETRICS"
-                    android:textColor="@color/mood_cyan"
-                    android:textSize="12sp"
-                    android:textStyle="bold"
-                    android:layout_marginBottom="16dp"/>
-
-                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:layout_marginBottom="12dp">
-                    <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="Heart Rate" android:textColor="@color/mood_text_muted" />
-                    <TextView android:id="@+id/wellnessBpmText" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="--" android:textColor="@color/mood_text" android:textStyle="bold" />
-                </LinearLayout>
-
-                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:layout_marginBottom="12dp">
-                    <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="Steps" android:textColor="@color/mood_text_muted" />
-                    <TextView android:id="@+id/wellnessStepsText" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="0" android:textColor="@color/mood_text" android:textStyle="bold" />
-                </LinearLayout>
-
-                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal">
-                    <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="Last Sync" android:textColor="@color/mood_text_muted" />
-                    <TextView android:id="@+id/wellnessSyncText" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Never" android:textColor="@color/mood_text" android:textStyle="bold" />
-                </LinearLayout>
-            </LinearLayout>
-
-            <!-- Weekly Stress Timeline Card -->
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="240dp"
-                android:layout_marginTop="16dp"
                 android:background="@drawable/glass_panel"
                 android:orientation="vertical"
                 android:padding="24dp">
 
+                <!-- Stress Alerts Toggle -->
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:orientation="horizontal">
-
-                    <TextView
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical">
+                    
+                    <LinearLayout
                         android:layout_width="0dp"
                         android:layout_height="wrap_content"
                         android:layout_weight="1"
-                        android:letterSpacing="0.1"
-                        android:text="WEEKLY STRESS TIMELINE"
-                        android:textColor="@color/mood_text"
-                        android:textSize="12sp"
-                        android:textStyle="bold" />                    <TextView
+                        android:orientation="vertical">
+                        
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="Stress Alerts"
+                            android:textColor="@color/white"
+                            android:textSize="16sp"
+                            android:textStyle="bold" />
+                            
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="Get notified and play calming music when high stress is detected."
+                            android:textColor="@color/mood_text"
+                            android:textSize="14sp"
+                            android:layout_marginTop="4dp" />
+                    </LinearLayout>
+                    
+                    <Switch
+                        android:id="@+id/switchStressAlerts"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="•••"
-                        android:textColor="@color/mood_text"
-                        android:textSize="16sp" />
+                        android:checked="true" />
                 </LinearLayout>
 
-                <LinearLayout
-                    android:id="@+id/timelineContainer"
+                <View
                     android:layout_width="match_parent"
-                    android:layout_height="0dp"
-                    android:layout_weight="1"
-                    android:orientation="horizontal"
-                    android:gravity="bottom"
-                    android:baselineAligned="false"
-                    android:layout_marginBottom="8dp" />
+                    android:layout_height="1dp"
+                    android:layout_marginTop="16dp"
+                    android:layout_marginBottom="16dp"
+                    android:background="@color/mood_text_muted"
+                    android:alpha="0.2" />
 
+                <!-- Daily Summary Toggle -->
                 <LinearLayout
-                    android:id="@+id/timelineLabels"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:orientation="horizontal" />
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical">
+                    
+                    <LinearLayout
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:orientation="vertical">
+                        
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="Daily Wellness Summary"
+                            android:textColor="@color/white"
+                            android:textSize="16sp"
+                            android:textStyle="bold" />
+                            
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="Receive a daily digest of your emotional stability."
+                            android:textColor="@color/mood_text"
+                            android:textSize="14sp"
+                            android:layout_marginTop="4dp" />
+                    </LinearLayout>
+                    
+                    <Switch
+                        android:id="@+id/switchDailySummary"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:checked="true" />
+                </LinearLayout>
+                
+                <View
+                    android:layout_width="match_parent"
+                    android:layout_height="1dp"
+                    android:layout_marginTop="16dp"
+                    android:layout_marginBottom="16dp"
+                    android:background="@color/mood_text_muted"
+                    android:alpha="0.2" />
+
+                <!-- Weekly Summary Toggle -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical">
+                    
+                    <LinearLayout
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:orientation="vertical">
+                        
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="Weekly Wellness Summary"
+                            android:textColor="@color/white"
+                            android:textSize="16sp"
+                            android:textStyle="bold" />
+                            
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="End-of-week analysis of your stress timeline."
+                            android:textColor="@color/mood_text"
+                            android:textSize="14sp"
+                            android:layout_marginTop="4dp" />
+                    </LinearLayout>
+                    
+                    <Switch
+                        android:id="@+id/switchWeeklySummary"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:checked="true" />
+                </LinearLayout>
+                
+                <View
+                    android:layout_width="match_parent"
+                    android:layout_height="1dp"
+                    android:layout_marginTop="16dp"
+                    android:layout_marginBottom="16dp"
+                    android:background="@color/mood_text_muted"
+                    android:alpha="0.2" />
+
+                <!-- Achievements Toggle -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical">
+                    
+                    <LinearLayout
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:orientation="vertical">
+                        
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="Wellness Achievements"
+                            android:textColor="@color/white"
+                            android:textSize="16sp"
+                            android:textStyle="bold" />
+                            
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="Get notified when you hit stability milestones."
+                            android:textColor="@color/mood_text"
+                            android:textSize="14sp"
+                            android:layout_marginTop="4dp" />
+                    </LinearLayout>
+                    
+                    <Switch
+                        android:id="@+id/switchAchievements"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:checked="true" />
+                </LinearLayout>
             </LinearLayout>
+
         </LinearLayout>
     </ScrollView>
 </LinearLayout>

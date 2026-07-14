@@ -107,6 +107,7 @@ public class MainActivity extends AppCompatActivity {
     private static final String SCREEN_PREFERENCES = "preferences";
     private static final String SCREEN_MAIN_SETTINGS = "main_settings";
     private static final String SCREEN_PROFILE = "profile";
+    private static final String SCREEN_PROFILE_SETTINGS = "profile_settings";
 
     private static final String DEVICE_IMAGE_URL =
             "https://lh3.googleusercontent.com/aida-public/AB6AXuCwprrlfC4teTJ4gg_c0-xg_Ff94DbAN7TBpUFuDMPAeILcbS_2n4xN-e2PNM2hjeEba6SO9Fuv-CsOQ5dG2V034xMWo_3hUEbo75Ui-6Lc53Q2PF8hlj72yG6L89d6u_wHU-T6-piKm_IPGhKvp5gjUquChSZhNKjxSijVhmdmk__GPkuSWZdtvE2TXhlC4iaFdKKjX0CFjzdHvUsf2T5e9gWvrAUeFkk8mts6gRVvg5xhkkDvDN_Q9OqOZa0wPbvdiyOBAKjCoDQ";
@@ -155,6 +156,7 @@ public class MainActivity extends AppCompatActivity {
     private LinearLayout bottomNav;
     private ActivityResultLauncher<Set<String>> healthPermissionLauncher;
     private ActivityResultLauncher<String[]> blePermissionLauncher;
+    private ActivityResultLauncher<String> pickImageLauncher;
     private HealthConnectClient healthConnectClient;
     private HealthSnapshot latestHealthSnapshot = HealthSnapshot.defaultValues();
     private BluetoothAdapter bluetoothAdapter;
@@ -177,7 +179,7 @@ public class MainActivity extends AppCompatActivity {
             currentMoodLabel = mood;
             handler.post(() -> {
                 applyHealthSnapshot(currentContent);
-                if (SCREEN_PLAYER.equals(currentScreen) && !currentMoodLabel.equals(lastRecommendedMood)) {
+                if (SCREEN_PLAYER.equals(currentScreen)) {
                     generateRecommendations(false);
                 }
             });
@@ -277,6 +279,24 @@ public class MainActivity extends AppCompatActivity {
         bottomNav = findViewById(R.id.bottomNav);
         setupHealthConnectPermissionLauncher();
         setupBlePermissionLauncher();
+        pickImageLauncher = registerForActivityResult(
+                new ActivityResultContracts.GetContent(),
+                uri -> {
+                    if (uri != null) {
+                        try {
+                            getContentResolver().takePersistableUriPermission(uri, android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                        } catch (Exception e) {
+                            e.printStackTrace();
+                        }
+                        getSharedPreferences("MusicZPrefs", MODE_PRIVATE).edit()
+                                .putString("profileImageUri", uri.toString()).apply();
+                        if (SCREEN_MAIN_SETTINGS.equals(currentScreen)) {
+                            configureMainSettingsScreen(currentContent);
+                        } else if (SCREEN_PROFILE_SETTINGS.equals(currentScreen)) {
+                            configureProfileSettingsScreen(currentContent);
+                        }
+                    }
+                });
         BluetoothManager bluetoothManager = getSystemService(BluetoothManager.class);
         if (bluetoothManager != null) {
             bluetoothAdapter = bluetoothManager.getAdapter();
@@ -287,13 +307,9 @@ public class MainActivity extends AppCompatActivity {
         scheduleSummaryAlarms();
         requestNotificationPermission();
         handleIntent(getIntent());
-        showScreen(SCREEN_SPLASH);
-
-        handler.postDelayed(() -> {
-            if (SCREEN_SPLASH.equals(currentScreen)) {
-                showScreen(SCREEN_ONBOARDING);
-            }
-        }, 1700);
+        if (SCREEN_SPLASH.equals(currentScreen)) {
+            showScreen(SCREEN_HOME);
+        }
     }
     
     private void scheduleSummaryAlarms() {
@@ -382,7 +398,7 @@ public class MainActivity extends AppCompatActivity {
                     showScreen(SCREEN_HOME);
                 } else if (SCREEN_MAIN_SETTINGS.equals(currentScreen)) {
                     showScreen(previousScreenBeforeSettings != null ? previousScreenBeforeSettings : SCREEN_HOME);
-                } else if (SCREEN_PREFERENCES.equals(currentScreen) || SCREEN_SETTINGS.equals(currentScreen)) {
+                } else if (SCREEN_PREFERENCES.equals(currentScreen) || SCREEN_SETTINGS.equals(currentScreen) || SCREEN_PROFILE_SETTINGS.equals(currentScreen)) {
                     showScreen(SCREEN_MAIN_SETTINGS);
                 } else {
                     setEnabled(false);
@@ -486,6 +502,8 @@ public class MainActivity extends AppCompatActivity {
                 return R.layout.screen_player;
             case SCREEN_SETTINGS:
                 return R.layout.screen_settings;
+            case SCREEN_PROFILE_SETTINGS:
+                return R.layout.screen_profile_settings;
             case SCREEN_WELLNESS:
                 return R.layout.screen_wellness;
             case SCREEN_PREFERENCES:
@@ -500,11 +518,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void configureScreen(View content, String screen) {
-        ImageView topAvatar = content.findViewById(R.id.topAvatar);
-        if (topAvatar != null) {
-            loadImage(avatarForScreen(screen), topAvatar);
-            topAvatar.setOnClickListener(v -> showScreen(SCREEN_PROFILE));
-        }
+        View topAppIcon = content.findViewById(R.id.topAppIcon);
 
         TextView topBrand = content.findViewById(R.id.topBrand);
         if (topBrand != null) {
@@ -533,8 +547,13 @@ public class MainActivity extends AppCompatActivity {
             });
         }
 
-        ImageButton settingsButton = content.findViewById(R.id.settingsButton);
+        ImageView settingsButton = content.findViewById(R.id.settingsButton);
         if (settingsButton != null) {
+            SharedPreferences prefs = getSharedPreferences("MusicZPrefs", MODE_PRIVATE);
+            String imageUriStr = prefs.getString("profileImageUri", null);
+            if (imageUriStr != null) {
+                settingsButton.setImageURI(android.net.Uri.parse(imageUriStr));
+            }
             settingsButton.setOnClickListener(view -> {
                 previousScreenBeforeSettings = currentScreen;
                 showScreen(SCREEN_MAIN_SETTINGS);
@@ -543,7 +562,11 @@ public class MainActivity extends AppCompatActivity {
 
         View getStartedButton = content.findViewById(R.id.getStartedButton);
         if (getStartedButton != null) {
-            getStartedButton.setOnClickListener(view -> showScreen(SCREEN_HOME));
+            getStartedButton.setOnClickListener(view -> {
+                SharedPreferences prefs = getSharedPreferences("MusicZPrefs", MODE_PRIVATE);
+                prefs.edit().putBoolean("hasCompletedOnboarding", true).apply();
+                showScreen(SCREEN_HOME);
+            });
         }
 
 
@@ -583,8 +606,12 @@ public class MainActivity extends AppCompatActivity {
             configureWellnessScreen(content);
         } else if (SCREEN_MAIN_SETTINGS.equals(screen)) {
             configureMainSettingsScreen(content);
+        } else if (SCREEN_PROFILE_SETTINGS.equals(screen)) {
+            configureProfileSettingsScreen(content);
         } else if (SCREEN_SETTINGS.equals(screen)) {
             configureSettingsScreen(content);
+        } else if (SCREEN_HOME.equals(screen)) {
+            configureHomeScreen(content);
         }
 
         applyHealthSnapshot(content);
@@ -770,6 +797,29 @@ public class MainActivity extends AppCompatActivity {
             backBtn.setOnClickListener(v -> showScreen(previousScreenBeforeSettings != null ? previousScreenBeforeSettings : SCREEN_HOME));
         }
 
+        SharedPreferences prefs = getSharedPreferences("MusicZPrefs", MODE_PRIVATE);
+        String name = prefs.getString("profileName", "User Name");
+        String email = prefs.getString("profileEmail", "Set up your profile");
+        
+        TextView profileName = content.findViewById(R.id.profileHubName);
+        if (profileName != null) profileName.setText(name);
+
+        TextView profileEmail = content.findViewById(R.id.profileHubEmail);
+        if (profileEmail != null) profileEmail.setText(email);
+
+        ImageView profileAvatar = content.findViewById(R.id.profileHubAvatar);
+        if (profileAvatar != null) {
+            String imageUriStr = prefs.getString("profileImageUri", null);
+            if (imageUriStr != null) {
+                profileAvatar.setImageURI(android.net.Uri.parse(imageUriStr));
+            }
+        }
+
+        View btnProfileSettings = content.findViewById(R.id.btnOpenProfileSettings);
+        if (btnProfileSettings != null) {
+            btnProfileSettings.setOnClickListener(v -> showScreen(SCREEN_PROFILE_SETTINGS));
+        }
+
         View btnPreferences = content.findViewById(R.id.btnOpenPreferences);
         if (btnPreferences != null) {
             btnPreferences.setOnClickListener(v -> showScreen(SCREEN_PREFERENCES));
@@ -809,6 +859,66 @@ public class MainActivity extends AppCompatActivity {
         if (switchAchievements != null) {
             switchAchievements.setChecked(prefs.getBoolean("prefAchievements", true));
             switchAchievements.setOnCheckedChangeListener((btn, isChecked) -> prefs.edit().putBoolean("prefAchievements", isChecked).apply());
+        }
+    }
+
+    private void configureProfileSettingsScreen(View content) {
+        View backBtn = content.findViewById(R.id.backFromProfileSettingsBtn);
+        if (backBtn != null) {
+            backBtn.setOnClickListener(v -> showScreen(SCREEN_MAIN_SETTINGS));
+        }
+
+        SharedPreferences prefs = getSharedPreferences("MusicZPrefs", MODE_PRIVATE);
+        EditText editName = content.findViewById(R.id.editProfileName);
+        EditText editEmail = content.findViewById(R.id.editProfileEmail);
+        
+        if (editName != null) editName.setText(prefs.getString("profileName", ""));
+        if (editEmail != null) editEmail.setText(prefs.getString("profileEmail", ""));
+        ImageView editAvatar = content.findViewById(R.id.profileSettingsAvatar);
+        if (editAvatar != null) {
+            String imageUriStr = prefs.getString("profileImageUri", null);
+            if (imageUriStr != null) {
+                editAvatar.setImageURI(android.net.Uri.parse(imageUriStr));
+            }
+            editAvatar.setOnClickListener(v -> pickImageLauncher.launch("image/*"));
+        }
+        
+        View btnSave = content.findViewById(R.id.btnSaveProfile);
+        if (btnSave != null) {
+            btnSave.setOnClickListener(v -> {
+                SharedPreferences.Editor editor = prefs.edit();
+                if (editName != null) editor.putString("profileName", editName.getText().toString());
+                if (editEmail != null) editor.putString("profileEmail", editEmail.getText().toString());
+                editor.apply();
+                
+                Toast.makeText(MainActivity.this, "Profile Saved", Toast.LENGTH_SHORT).show();
+                showScreen(SCREEN_MAIN_SETTINGS);
+            });
+        }
+    }
+
+    private void configureHomeScreen(View content) {
+        TextView welcomeText = content.findViewById(R.id.homeWelcomeText);
+        if (welcomeText != null) {
+            SharedPreferences prefs = getSharedPreferences("MusicZPrefs", MODE_PRIVATE);
+            String name = prefs.getString("profileName", "Alex");
+            if (name.isEmpty()) name = "there";
+
+            java.util.Calendar c = java.util.Calendar.getInstance();
+            int timeOfDay = c.get(java.util.Calendar.HOUR_OF_DAY);
+
+            String greeting = "Good evening";
+            if(timeOfDay >= 0 && timeOfDay < 12){
+                greeting = "Good morning";
+            } else if(timeOfDay >= 12 && timeOfDay < 16){
+                greeting = "Good afternoon";
+            } else if(timeOfDay >= 16 && timeOfDay < 21){
+                greeting = "Good evening";
+            } else if(timeOfDay >= 21 && timeOfDay < 24){
+                greeting = "Welcome back";
+            }
+
+            welcomeText.setText(greeting + ", " + name + "!");
         }
     }
 
@@ -866,21 +976,27 @@ public class MainActivity extends AppCompatActivity {
                     java.util.Map<String, Integer> moodCounts = new java.util.HashMap<>();
                     int stressedCount = 0;
                     int calmCount = 0;
+                    int validMoodCount = 0;
                     for (com.example.genzmusicapp.db.WellnessHistory h : history) {
                         String mood = h.calculatedMood;
-                        if (mood == null || mood.isEmpty()) mood = "Unknown";
-                        moodCounts.put(mood, moodCounts.getOrDefault(mood, 0) + 1);
-                        if (mood.equalsIgnoreCase("Stressed") || mood.equalsIgnoreCase("Anxious")) stressedCount++;
-                        if (mood.equalsIgnoreCase("Relax") || mood.equalsIgnoreCase("Calm")) calmCount++;
+                        if (mood != null && !mood.isEmpty() && !mood.equalsIgnoreCase("Unknown")) {
+                            moodCounts.put(mood, moodCounts.getOrDefault(mood, 0) + 1);
+                            validMoodCount++;
+                        }
+                        if (mood != null && (mood.equalsIgnoreCase("Stressed") || mood.equalsIgnoreCase("Anxious"))) stressedCount++;
+                        if (mood != null && (mood.equalsIgnoreCase("Relax") || mood.equalsIgnoreCase("Calm"))) calmCount++;
                     }
 
                     StringBuilder distStr = new StringBuilder();
-                    for (java.util.Map.Entry<String, Integer> entry : moodCounts.entrySet()) {
-                        int percent = (int) Math.round((entry.getValue() * 100.0) / history.size());
-                        if (percent > 0) {
-                            distStr.append("• ").append(entry.getKey()).append(": ").append(percent).append("%\n");
+                    if (validMoodCount > 0) {
+                        for (java.util.Map.Entry<String, Integer> entry : moodCounts.entrySet()) {
+                            int percent = (int) Math.round((entry.getValue() * 100.0) / validMoodCount);
+                            if (percent > 0) {
+                                distStr.append("• ").append(entry.getKey()).append(": ").append(percent).append("%\n");
+                            }
                         }
                     }
+                    if (distStr.length() == 0) distStr.append("Not enough mood data yet.");
                     tvMoodDist.setText(distStr.toString().trim());
 
                     // 4. Calculate Emotional Stability Score
@@ -1894,6 +2010,8 @@ public class MainActivity extends AppCompatActivity {
                 } catch (Exception ignored) {}
             });
         }
+        
+
     }
 
     private String calculateLiveMood(long bpm, long steps) {
@@ -1911,7 +2029,8 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    @SuppressWarnings("unchecked")
+
+
     private <T> T runBlockingResult(SuspendingBlock<T> block) {
         Function2<CoroutineScope, Continuation<? super T>, Object> function =
                 (scope, continuation) -> block.run(continuation);

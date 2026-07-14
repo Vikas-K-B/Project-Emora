@@ -49,7 +49,21 @@ public class WellnessNotificationReceiver extends BroadcastReceiver {
                 long avg = 0;
                 for (WellnessHistory h : history) avg += h.bpm;
                 avg /= history.size();
-                content = "Your average heart rate today was " + avg + " BPM. See full analysis.";
+                
+                String[] lowHrMessages = {
+                    "Your average heart rate today was " + avg + " BPM. You maintained great calm today.",
+                    "A very relaxed day! Your heart rate averaged " + avg + " BPM.",
+                    "Your baseline was " + avg + " BPM today. Great job keeping stress low!"
+                };
+                
+                String[] highHrMessages = {
+                    "Your average heart rate today was " + avg + " BPM. It's been a high-energy day!",
+                    "Quite an active day! You averaged " + avg + " BPM.",
+                    "Your heart rate was elevated today at " + avg + " BPM. Take some time to rest."
+                };
+                
+                int rnd = new java.util.Random().nextInt(3);
+                content = (avg < 75) ? lowHrMessages[rnd] : highHrMessages[rnd];
             }
             sendNotification(context, "Daily Wellness Summary", content);
         });
@@ -57,7 +71,13 @@ public class WellnessNotificationReceiver extends BroadcastReceiver {
 
     private void generateWeeklySummary(Context context) {
         Executors.newSingleThreadExecutor().execute(() -> {
-            sendNotification(context, "Weekly Wellness Summary", "Your weekly stress timeline is ready! Check how your mood evolved this week.");
+            String[] weeklyMessages = {
+                "Your weekly stress timeline is ready! Check how your mood evolved this week.",
+                "Your Weekly Wellness Report is in. Tap to see your emotional stability score.",
+                "A new week, a new baseline! Review your weekly biometric summary now."
+            };
+            int rnd = new java.util.Random().nextInt(3);
+            sendNotification(context, "Weekly Wellness Summary", weeklyMessages[rnd]);
         });
     }
     
@@ -79,7 +99,7 @@ public class WellnessNotificationReceiver extends BroadcastReceiver {
                 .setContentTitle(title)
                 .setContentText(text)
                 .setStyle(new NotificationCompat.BigTextStyle().bigText(text))
-                .setSmallIcon(android.R.drawable.ic_dialog_info)
+                .setSmallIcon(R.mipmap.ic_launcher_round)
                 .setContentIntent(pendingIntent)
                 .setAutoCancel(true)
                 .setPriority(NotificationCompat.PRIORITY_DEFAULT);

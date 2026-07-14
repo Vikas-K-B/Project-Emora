@@ -13,4 +13,9 @@
         <item name="chipStrokeWidth">1dp</item>
         <item name="chipStrokeColor">#3a494a</item>
     </style>
+
+    <style name="circleImageView" parent="">
+        <item name="cornerFamily">rounded</item>
+        <item name="cornerSize">50%</item>
+    </style>
 </resources>

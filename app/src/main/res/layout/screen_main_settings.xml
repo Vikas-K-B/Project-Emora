@@ -1,11 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:background="@drawable/bg_app"
     android:orientation="vertical">
-
-    <include layout="@layout/view_topbar" />
 
     <ScrollView
         android:layout_width="match_parent"
@@ -19,7 +18,7 @@
             android:layout_height="wrap_content"
             android:orientation="vertical"
             android:paddingStart="24dp"
-            android:paddingTop="24dp"
+            android:paddingTop="16dp"
             android:paddingEnd="24dp"
             android:paddingBottom="116dp">
 
@@ -28,14 +27,14 @@
                 android:layout_height="wrap_content"
                 android:orientation="horizontal"
                 android:gravity="center_vertical"
-                android:layout_marginBottom="32dp">
+                android:layout_marginBottom="24dp">
 
                 <ImageButton
                     android:id="@+id/backFromMainSettingsButton"
                     android:layout_width="40dp"
                     android:layout_height="40dp"
                     android:background="?attr/selectableItemBackgroundBorderless"
-                    android:src="@android:drawable/ic_menu_revert"
+                    android:src="@drawable/ic_arrow_back"
                     android:tint="@color/mood_cyan"
                     android:contentDescription="Back" />
 
@@ -44,10 +43,95 @@
                     android:layout_height="wrap_content"
                     android:layout_marginStart="8dp"
                     android:fontFamily="sans-serif-black"
-                    android:text="SETTINGS"
+                    android:text="PROFILE"
                     android:textColor="@color/mood_text"
-                    android:textSize="32sp"
+                    android:textSize="28sp"
                     android:textStyle="bold" />
+            </LinearLayout>
+
+            <!-- Profile Summary Header -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="32dp"
+                android:gravity="center"
+                android:orientation="vertical">
+
+                <com.google.android.material.imageview.ShapeableImageView
+                    android:id="@+id/profileHubAvatar"
+                    android:layout_width="100dp"
+                    android:layout_height="100dp"
+                    app:shapeAppearanceOverlay="@style/circleImageView"
+                    android:scaleType="centerCrop"
+                    android:src="@drawable/ic_person" />
+
+                <TextView
+                    android:id="@+id/profileHubName"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="16dp"
+                    android:text="User Name"
+                    android:textColor="@color/mood_text"
+                    android:textSize="26sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/profileHubEmail"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:text="Set up your profile"
+                    android:textColor="@color/mood_text_dim"
+                    android:textSize="16sp" />
+            </LinearLayout>
+
+            <!-- Account Details Option -->
+            <LinearLayout
+                android:id="@+id/btnOpenProfileSettings"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:background="@drawable/glass_panel"
+                android:clickable="true"
+                android:focusable="true"
+                android:orientation="horizontal"
+                android:padding="20dp"
+                android:gravity="center_vertical"
+                android:layout_marginBottom="16dp">
+
+                <ImageView
+                    android:layout_width="28dp"
+                    android:layout_height="28dp"
+                    android:src="@drawable/ic_person"
+                    android:tint="@color/mood_cyan" />
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:layout_marginStart="16dp"
+                    android:orientation="vertical">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Account Details"
+                        android:textColor="@color/mood_text"
+                        android:textSize="18sp"
+                        android:textStyle="bold" />
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Name, email, and photo"
+                        android:textColor="#AAB7C8"
+                        android:textSize="14sp" />
+                </LinearLayout>
+                
+                <ImageView
+                    android:layout_width="24dp"
+                    android:layout_height="24dp"
+                    android:src="@android:drawable/ic_media_play"
+                    android:tint="#88AAB7C8" />
             </LinearLayout>
 
             <LinearLayout

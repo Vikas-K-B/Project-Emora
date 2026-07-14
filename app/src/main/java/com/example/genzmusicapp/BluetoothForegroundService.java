@@ -189,6 +189,14 @@ public class BluetoothForegroundService extends Service {
             });
             updateNotification(currentBpm + " BPM | Mood: " + prediction.mood);
             evaluateStressAlert(prediction.mood, currentBpm);
+            
+            // Update widget
+            Intent widgetIntent = new Intent(this, MoodSyncWidgetProvider.class);
+            widgetIntent.setAction(MoodSyncWidgetProvider.ACTION_UPDATE_WIDGET);
+            widgetIntent.putExtra(MoodSyncWidgetProvider.EXTRA_BPM, currentBpm);
+            widgetIntent.putExtra(MoodSyncWidgetProvider.EXTRA_MOOD, prediction.mood);
+            sendBroadcast(widgetIntent);
+            
         } else {
             updateNotification(currentBpm > 0 ? currentBpm + " BPM" : "Connected. Waiting for HR...");
         }
@@ -239,7 +247,7 @@ public class BluetoothForegroundService extends Service {
                     .setContentTitle("High Stress Detected")
                     .setContentText(explainableText)
                     .setStyle(new NotificationCompat.BigTextStyle().bigText(explainableText))
-                    .setSmallIcon(android.R.drawable.stat_notify_error)
+                    .setSmallIcon(R.mipmap.ic_launcher_round)
                     .setContentIntent(pendingIntent)
                     .setAutoCancel(true)
                     .setPriority(NotificationCompat.PRIORITY_HIGH);
@@ -432,7 +440,7 @@ public class BluetoothForegroundService extends Service {
         return new NotificationCompat.Builder(this, CHANNEL_ID)
                 .setContentTitle("MusicZ Sync Active")
                 .setContentText(contentText)
-                .setSmallIcon(android.R.drawable.stat_sys_data_bluetooth)
+                .setSmallIcon(R.mipmap.ic_launcher_round)
                 .setContentIntent(pendingIntent)
                 .setPriority(NotificationCompat.PRIORITY_LOW)
                 .setOngoing(true)

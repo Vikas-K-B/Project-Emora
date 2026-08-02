@@ -226,7 +226,7 @@ public class BluetoothForegroundService extends Service {
         java.util.concurrent.Executors.newSingleThreadExecutor().execute(() -> {
             // Calculate baseline HR
             java.util.List<com.example.genzmusicapp.db.WellnessHistory> history =
-                    com.example.genzmusicapp.db.AppDatabase.getDatabase(this).wellnessDao().getRecentHistory(500);
+                    com.example.genzmusicapp.db.AppDatabase.getDatabase(this).wellnessDao().getRecentHistory(com.google.firebase.auth.FirebaseAuth.getInstance().getCurrentUser() != null ? com.google.firebase.auth.FirebaseAuth.getInstance().getCurrentUser().getUid() : "guest", 500);
             long avgBpm = 75; // fallback
             if (history != null && !history.isEmpty()) {
                 long sum = 0;

@@ -43,7 +43,7 @@ public class WellnessNotificationReceiver extends BroadcastReceiver {
     
     private void generateDailySummary(Context context) {
         Executors.newSingleThreadExecutor().execute(() -> {
-            List<WellnessHistory> history = AppDatabase.getDatabase(context).wellnessDao().getRecentHistory(500);
+            List<WellnessHistory> history = AppDatabase.getDatabase(context).wellnessDao().getRecentHistory(com.google.firebase.auth.FirebaseAuth.getInstance().getCurrentUser() != null ? com.google.firebase.auth.FirebaseAuth.getInstance().getCurrentUser().getUid() : "guest", 500);
             String content = "Check out your daily emotional stability breakdown!";
             if (history != null && !history.isEmpty()) {
                 long avg = 0;

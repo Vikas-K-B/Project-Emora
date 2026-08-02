@@ -1,0 +1,47 @@
+{
+  "project_info": {
+    "project_number": "445817305343",
+    "project_id": "moodsync-93daf",
+    "storage_bucket": "moodsync-93daf.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:445817305343:android:a7210542ba6b375013b4ca",
+        "android_client_info": {
+          "package_name": "com.example.genzmusicapp"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "445817305343-v8h3nsf5e39n28c2u3j8vafodu63aqnt.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.example.genzmusicapp",
+            "certificate_hash": "b392a1b74e2967f629d7df750960a8e62ef792d8"
+          }
+        },
+        {
+          "client_id": "445817305343-i4vfcjsttniaqvd94patok905r5um0hd.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBTWJCggC_BBmfIXli_hXIb1crvyCugCZ0"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "445817305343-i4vfcjsttniaqvd94patok905r5um0hd.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

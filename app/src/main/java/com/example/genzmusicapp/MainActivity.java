@@ -52,6 +52,18 @@ import androidx.activity.OnBackPressedCallback;
 import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.appcompat.app.AppCompatActivity;
+
+import com.google.firebase.auth.FirebaseAuth;
+import com.google.firebase.auth.FirebaseUser;
+import com.google.firebase.auth.AuthCredential;
+import com.google.firebase.auth.GoogleAuthProvider;
+import com.google.android.gms.auth.api.signin.GoogleSignIn;
+import com.google.android.gms.auth.api.signin.GoogleSignInAccount;
+import com.google.android.gms.auth.api.signin.GoogleSignInClient;
+import com.google.android.gms.auth.api.signin.GoogleSignInOptions;
+import com.google.android.gms.common.api.ApiException;
+import com.google.android.gms.tasks.Task;
+
 import androidx.core.content.ContextCompat;
 import androidx.core.graphics.Insets;
 import androidx.core.view.ViewCompat;
@@ -98,7 +110,7 @@ import kotlinx.coroutines.CoroutineScope;
 
 public class MainActivity extends AppCompatActivity {
     private static final String SCREEN_SPLASH = "splash";
-    private static final String SCREEN_ONBOARDING = "onboarding";
+    private static final String SCREEN_LOGIN = "login";
     private static final String SCREEN_HOME = "home";
     private static final String SCREEN_LIVE = "live";
     private static final String SCREEN_PLAYER = "player";
@@ -157,6 +169,10 @@ public class MainActivity extends AppCompatActivity {
     private ActivityResultLauncher<Set<String>> healthPermissionLauncher;
     private ActivityResultLauncher<String[]> blePermissionLauncher;
     private ActivityResultLauncher<String> pickImageLauncher;
+    private FirebaseAuth mAuth;
+    private GoogleSignInClient mGoogleSignInClient;
+    private ActivityResultLauncher<Intent> googleSignInLauncher;
+
     private HealthConnectClient healthConnectClient;
     private HealthSnapshot latestHealthSnapshot = HealthSnapshot.defaultValues();
     private BluetoothAdapter bluetoothAdapter;
@@ -279,6 +295,29 @@ public class MainActivity extends AppCompatActivity {
         bottomNav = findViewById(R.id.bottomNav);
         setupHealthConnectPermissionLauncher();
         setupBlePermissionLauncher();
+        
+        mAuth = FirebaseAuth.getInstance();
+        GoogleSignInOptions gso = new GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
+                .requestIdToken("445817305343-i4vfcjsttniaqvd94patok905r5um0hd.apps.googleusercontent.com") // We don't have the web client ID, using string trick or default, wait, I need the actual Web Client ID. Wait, I will use "445817305343-i4vfcjsttniaqvd94patok905r5um0hd.apps.googleusercontent.com"
+                .requestEmail()
+                .build();
+        mGoogleSignInClient = GoogleSignIn.getClient(this, gso);
+
+        googleSignInLauncher = registerForActivityResult(
+                new ActivityResultContracts.StartActivityForResult(),
+                result -> {
+                    if (result.getResultCode() == RESULT_OK && result.getData() != null) {
+                        Task<GoogleSignInAccount> task = GoogleSignIn.getSignedInAccountFromIntent(result.getData());
+                        try {
+                            GoogleSignInAccount account = task.getResult(ApiException.class);
+                            firebaseAuthWithGoogle(account.getIdToken());
+                        } catch (ApiException e) {
+                            Toast.makeText(this, "Google sign in failed", Toast.LENGTH_SHORT).show();
+                        }
+                    }
+                }
+        );
+
         pickImageLauncher = registerForActivityResult(
                 new ActivityResultContracts.GetContent(),
                 uri -> {
@@ -307,9 +346,15 @@ public class MainActivity extends AppCompatActivity {
         scheduleSummaryAlarms();
         requestNotificationPermission();
         handleIntent(getIntent());
+        
         if (SCREEN_SPLASH.equals(currentScreen)) {
-            showScreen(SCREEN_HOME);
+            if (mAuth.getCurrentUser() != null) {
+                showScreen(SCREEN_HOME);
+            } else {
+                showScreen(SCREEN_LOGIN);
+            }
         }
+
     }
     
     private void scheduleSummaryAlarms() {
@@ -379,6 +424,28 @@ public class MainActivity extends AppCompatActivity {
             showScreen(SCREEN_PLAYER);
             generateRecommendations(true);
         }
+    }
+
+    
+    private void firebaseAuthWithGoogle(String idToken) {
+        AuthCredential credential = GoogleAuthProvider.getCredential(idToken, null);
+        mAuth.signInWithCredential(credential)
+                .addOnCompleteListener(this, task -> {
+                    if (task.isSuccessful()) {
+                        FirebaseUser user = mAuth.getCurrentUser();
+                        if (user != null) {
+                            SharedPreferences prefs = getSharedPreferences("MusicZPrefs", MODE_PRIVATE);
+                            SharedPreferences.Editor editor = prefs.edit();
+                            if (user.getDisplayName() != null) editor.putString("profileName", user.getDisplayName());
+                            if (user.getEmail() != null) editor.putString("profileEmail", user.getEmail());
+                            if (user.getPhotoUrl() != null) editor.putString("profileImageUri", user.getPhotoUrl().toString());
+                            editor.apply();
+                        }
+                        showScreen(SCREEN_HOME);
+                    } else {
+                        android.widget.Toast.makeText(this, "Authentication Failed.", android.widget.Toast.LENGTH_SHORT).show();
+                    }
+                });
     }
 
     private void setupBottomNavigation() {
@@ -492,8 +559,8 @@ public class MainActivity extends AppCompatActivity {
 
     private int getLayoutForScreen(String screen) {
         switch (screen) {
-            case SCREEN_ONBOARDING:
-                return R.layout.screen_onboarding;
+            case SCREEN_LOGIN:
+                return R.layout.screen_login;
             case SCREEN_HOME:
                 return R.layout.screen_home;
             case SCREEN_LIVE:
@@ -552,7 +619,7 @@ public class MainActivity extends AppCompatActivity {
             SharedPreferences prefs = getSharedPreferences("MusicZPrefs", MODE_PRIVATE);
             String imageUriStr = prefs.getString("profileImageUri", null);
             if (imageUriStr != null) {
-                settingsButton.setImageURI(android.net.Uri.parse(imageUriStr));
+                loadImage(imageUriStr, settingsButton);
             }
             settingsButton.setOnClickListener(view -> {
                 previousScreenBeforeSettings = currentScreen;
@@ -598,6 +665,8 @@ public class MainActivity extends AppCompatActivity {
 
         if (SCREEN_PLAYER.equals(screen)) {
             configurePlayerScreen(content);
+        } else if (SCREEN_LOGIN.equals(screen)) {
+            configureLoginScreen(content);
         } else if (SCREEN_PREFERENCES.equals(screen)) {
             configurePreferencesScreen(content);
         } else if (SCREEN_PROFILE.equals(screen)) {
@@ -811,7 +880,7 @@ public class MainActivity extends AppCompatActivity {
         if (profileAvatar != null) {
             String imageUriStr = prefs.getString("profileImageUri", null);
             if (imageUriStr != null) {
-                profileAvatar.setImageURI(android.net.Uri.parse(imageUriStr));
+                loadImage(imageUriStr, profileAvatar);
             }
         }
 
@@ -828,6 +897,42 @@ public class MainActivity extends AppCompatActivity {
         View btnNotifications = content.findViewById(R.id.btnOpenNotifications);
         if (btnNotifications != null) {
             btnNotifications.setOnClickListener(v -> showScreen(SCREEN_SETTINGS));
+        }
+
+        View btnConnectedDevice = content.findViewById(R.id.btnOpenConnectedDevice);
+        if (btnConnectedDevice != null) {
+            btnConnectedDevice.setOnClickListener(v -> android.widget.Toast.makeText(this, "Connected Device settings coming soon", android.widget.Toast.LENGTH_SHORT).show());
+        }
+
+        View btnHealthConnect = content.findViewById(R.id.btnOpenHealthConnect);
+        if (btnHealthConnect != null) {
+            btnHealthConnect.setOnClickListener(v -> android.widget.Toast.makeText(this, "Health Connect settings coming soon", android.widget.Toast.LENGTH_SHORT).show());
+        }
+
+        View btnAppearance = content.findViewById(R.id.btnOpenAppearance);
+        if (btnAppearance != null) {
+            btnAppearance.setOnClickListener(v -> android.widget.Toast.makeText(this, "Appearance settings coming soon", android.widget.Toast.LENGTH_SHORT).show());
+        }
+
+        View btnPrivacy = content.findViewById(R.id.btnOpenPrivacy);
+        if (btnPrivacy != null) {
+            btnPrivacy.setOnClickListener(v -> android.widget.Toast.makeText(this, "Privacy settings coming soon", android.widget.Toast.LENGTH_SHORT).show());
+        }
+
+        View btnAbout = content.findViewById(R.id.btnOpenAbout);
+        if (btnAbout != null) {
+            btnAbout.setOnClickListener(v -> android.widget.Toast.makeText(this, "About MoodSync coming soon", android.widget.Toast.LENGTH_SHORT).show());
+        }
+
+        View btnLogout = content.findViewById(R.id.btnLogout);
+        if (btnLogout != null) {
+            btnLogout.setOnClickListener(v -> {
+                android.widget.Toast.makeText(this, "Logged out successfully", android.widget.Toast.LENGTH_SHORT).show();
+                mAuth.signOut();
+                mGoogleSignInClient.signOut().addOnCompleteListener(this, task -> {
+                    showScreen(SCREEN_LOGIN);
+                });
+            });
         }
     }
 
@@ -878,7 +983,7 @@ public class MainActivity extends AppCompatActivity {
         if (editAvatar != null) {
             String imageUriStr = prefs.getString("profileImageUri", null);
             if (imageUriStr != null) {
-                editAvatar.setImageURI(android.net.Uri.parse(imageUriStr));
+                loadImage(imageUriStr, editAvatar);
             }
             editAvatar.setOnClickListener(v -> pickImageLauncher.launch("image/*"));
         }
@@ -922,6 +1027,16 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
+    private void configureLoginScreen(View view) {
+        View btnGoogleSignIn = view.findViewById(R.id.btnGoogleSignIn);
+        if (btnGoogleSignIn != null) {
+            btnGoogleSignIn.setOnClickListener(v -> {
+                android.content.Intent signInIntent = mGoogleSignInClient.getSignInIntent();
+                googleSignInLauncher.launch(signInIntent);
+            });
+        }
+    }
+
     private void configureWellnessScreen(View content) {
         TextView tvScoreValue = content.findViewById(R.id.tvEmotionalScoreValue);
         TextView tvScoreTrend = content.findViewById(R.id.tvEmotionalScoreTrend);
@@ -939,7 +1054,7 @@ public class MainActivity extends AppCompatActivity {
         java.util.concurrent.Executors.newSingleThreadExecutor().execute(() -> {
             try {
                 java.util.List<com.example.genzmusicapp.db.WellnessHistory> history =
-                        com.example.genzmusicapp.db.AppDatabase.getDatabase(this).wellnessDao().getRecentHistory(500);
+                        com.example.genzmusicapp.db.AppDatabase.getDatabase(this).wellnessDao().getRecentHistory(mAuth.getCurrentUser() != null ? mAuth.getCurrentUser().getUid() : "guest", 500);
 
                 runOnUiThread(() -> {
                     if (history == null || history.isEmpty()) {
@@ -2006,6 +2121,7 @@ public class MainActivity extends AppCompatActivity {
                     wh.calculatedScore = score;
                     wh.calculatedMood = currentMoodLabel;
                     wh.timestamp = System.currentTimeMillis();
+                    wh.userId = mAuth.getCurrentUser() != null ? mAuth.getCurrentUser().getUid() : "guest";
                     db.wellnessDao().insert(wh);
                 } catch (Exception ignored) {}
             });

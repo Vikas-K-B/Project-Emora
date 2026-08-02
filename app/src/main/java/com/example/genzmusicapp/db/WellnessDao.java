@@ -7,8 +7,8 @@ import java.util.List;
 
 @Dao
 public interface WellnessDao {
-    @Query("SELECT * FROM wellness_history ORDER BY timestamp DESC LIMIT :limit")
-    List<WellnessHistory> getRecentHistory(int limit);
+    @Query("SELECT * FROM wellness_history WHERE userId = :userId ORDER BY timestamp DESC LIMIT :limit")
+    List<WellnessHistory> getRecentHistory(String userId, int limit);
 
     @Insert
     void insert(WellnessHistory history);

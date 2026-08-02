@@ -9,6 +9,7 @@ public class WellnessHistory {
     public long id;
     
     public long timestamp;
+    public String userId;
     public long bpm;
     public long steps;
     public long calculatedScore;

@@ -120,13 +120,13 @@ public class PulseScannerView extends View {
 
         // Draw Heart Glow
         paint.setStyle(Paint.Style.FILL);
-        paint.setColor(Color.argb(100, 255, 60, 120));
-        paint.setShadowLayer(finalSize * 0.4f, 0, 0, Color.argb(150, 255, 40, 100));
+        paint.setColor(Color.argb(100, 0, 245, 255));
+        paint.setShadowLayer(finalSize * 0.4f, 0, 0, Color.argb(150, 0, 200, 255));
         canvas.drawPath(heartPath, paint);
         
         // Draw Solid Heart Core
         paint.clearShadowLayer();
-        paint.setColor(Color.argb(255, 255, 70, 130));
+        paint.setColor(Color.argb(255, 0, 220, 255));
         canvas.drawPath(heartPath, paint);
     }
 

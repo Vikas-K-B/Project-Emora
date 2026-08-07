@@ -49,6 +49,9 @@
 
         html {
             scroll-behavior: smooth;
+            overflow-x: hidden;
+            width: 100%;
+            max-width: 100vw;
         }
 
         body {
@@ -57,7 +60,25 @@
             font-family: 'Outfit', sans-serif;
             line-height: 1.6;
             overflow-x: hidden;
+            width: 100%;
+            max-width: 100vw;
+            position: relative;
             -webkit-font-smoothing: antialiased;
+        }
+
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: var(--bg-base);
+        }
+        ::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, 0.15);
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: rgba(255, 255, 255, 0.25);
         }
 
         /* Utility Classes */
@@ -107,9 +128,9 @@
             pointer-events: none;
         }
         
-        .glow-1 { top: -10%; left: -5%; width: 600px; height: 600px; background: var(--accent-primary); }
-        .glow-2 { top: 20%; right: -10%; width: 500px; height: 500px; background: var(--accent-secondary); }
-        .glow-3 { bottom: -10%; left: 20%; width: 700px; height: 700px; background: var(--accent-primary); }
+        .glow-1 { top: -5%; left: -5%; width: 600px; height: 600px; background: var(--accent-primary); }
+        .glow-2 { top: 20%; right: -5%; width: 500px; height: 500px; background: var(--accent-secondary); }
+        .glow-3 { bottom: 5%; left: 20%; width: 700px; height: 700px; background: var(--accent-primary); }
 
         /* Buttons */
         .btn {
@@ -140,13 +161,7 @@
         
         .btn.loading {
             pointer-events: none;
-            opacity: 0.8;
-        }
-        .btn.loading svg {
-            animation: spin 1s linear infinite;
-        }
-        @keyframes spin {
-            100% { transform: rotate(360deg); }
+            opacity: 0.7;
         }
         
         .btn-outline {
@@ -609,8 +624,8 @@
         /* 7. Footer */
         footer {
             border-top: 1px solid var(--border-dim);
-            padding: 4rem 0 2rem;
-            margin-top: 4rem;
+            padding: 1rem 0;
+            margin-top: 1rem;
         }
 
         .footer-content {
@@ -644,24 +659,28 @@
         .copyright {
             width: 100%;
             text-align: center;
-            margin-top: 3rem;
+            margin-top: 1.5rem;
             color: #52525b;
             font-size: 0.875rem;
         }
 
         /* Responsive Design */
         @media (max-width: 768px) {
+            .container { padding: 0 1.25rem; }
             .section { padding: 5rem 0; }
             .hero-cta { flex-direction: column; }
             .carousel-track { padding: 2rem 1rem; }
             .phone-mockup { width: 260px; height: 540px; }
             .timeline-wrapper { margin: 3rem 0; }
+            .features-grid { grid-template-columns: 1fr; gap: 1.5rem; }
             .footer-content { flex-direction: column; text-align: center; }
+            .glow-blob { width: 300px; height: 300px; filter: blur(80px); }
+            nav { padding: 1.5rem !important; }
         }
     </style>
 </head>
 <body>
-    <nav style="position: absolute; top: 0; right: 0; padding: 2rem; display: flex; justify-content: flex-end; align-items: center; z-index: 10;">
+    <nav style="position: absolute; top: 0; left: 0; width: 100%; box-sizing: border-box; padding: 2rem; display: flex; justify-content: flex-end; align-items: center; z-index: 10;">
         <div style="display: flex; align-items: center; gap: 0.75rem;">
             <span class="brand-logo text-gradient" style="font-size: 1.5rem;">Emora</span>
             <img src="emora_icon.jpg" alt="Emora Icon" style="width: 40px; height: 40px; border-radius: 12px; box-shadow: 0 0 20px var(--border-glow);">
@@ -927,7 +946,7 @@
                 
                 <div class="meta-tags">
                     <div class="meta-tag"><i data-lucide="tag" width="16"></i> Version 1.0 Stable</div>
-                    <div class="meta-tag"><i data-lucide="hard-drive" width="16"></i> ~15 MB</div>
+                    <div class="meta-tag"><i data-lucide="hard-drive" width="16"></i> 46.2 MB</div>
                     <div class="meta-tag"><i data-lucide="smartphone" width="16"></i> Android 8.0+</div>
                     <div class="meta-tag"><i data-lucide="calendar" width="16"></i> Updated Today</div>
                 </div>
@@ -997,13 +1016,13 @@
         // Download Button Loading Animation
         function startDownload(btn) {
             btn.classList.add('loading');
-            const icon = btn.querySelector('i');
-            icon.setAttribute('data-lucide', 'loader-2');
+            const originalHTML = btn.innerHTML;
+            btn.innerHTML = '<i data-lucide="download"></i> Downloading...';
             lucide.createIcons();
             
             setTimeout(() => {
                 btn.classList.remove('loading');
-                icon.setAttribute('data-lucide', 'download');
+                btn.innerHTML = originalHTML;
                 lucide.createIcons();
             }, 3000);
         }

@@ -210,7 +210,7 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="16dp"
             android:lineSpacingExtra="7dp"
-            android:text="MoodSync AI detects your biometric signals through wearable sensors to generate real-time, adaptive music therapy designed to elevate focus and reduce stress."
+            android:text="Emora detects your biometric signals through wearable sensors to generate real-time, adaptive music therapy designed to elevate focus and reduce stress."
             android:textColor="@color/mood_text"
             android:textSize="19sp" />
 

@@ -1,0 +1,3 @@
+User-agent: *
+Allow: /
+Sitemap: https://emora.app/sitemap.xml

@@ -26,7 +26,10 @@ public class BiometricClassifier {
     
     // History buffers
     private final LinkedList<Float> hrBuffer = new LinkedList<>();
-    private final LinkedList<Float> stepsBuffer = new LinkedList<>();
+    private final LinkedList<Float> cadenceBuffer = new LinkedList<>();
+    
+    private float lastCumulativeSteps = -1;
+    private long lastStepTimestamp = -1;
     
     // Personalization baseline (could be loaded from user profile later)
     private float userBaselineHr = 70.0f; // Default starting baseline
@@ -69,12 +72,33 @@ public class BiometricClassifier {
      * @return MoodPrediction object containing the label and confidence
      */
     public MoodPrediction predictMood(float currentBpm, float currentSteps) {
+        float currentCadence = 0f;
+        long currentTime = System.currentTimeMillis();
+        
+        if (lastCumulativeSteps >= 0 && lastStepTimestamp > 0 && currentSteps >= lastCumulativeSteps) {
+            float deltaSteps = currentSteps - lastCumulativeSteps;
+            float timeDiffSecs = (currentTime - lastStepTimestamp) / 1000f;
+            
+            // Prevent cadence spikes from rapid Bluetooth packet buffering
+            if (timeDiffSecs > 0) {
+                // Assume a minimum window of 1 second to prevent dividing by tiny fractions like 0.1s
+                float effectiveTimeDiff = Math.max(1.0f, timeDiffSecs);
+                currentCadence = deltaSteps * (60f / effectiveTimeDiff);
+                
+                // Cap to maximum human limit (e.g. 250 SPM) to handle batched step updates
+                currentCadence = Math.min(250f, currentCadence);
+            }
+        }
+        
+        lastCumulativeSteps = currentSteps;
+        lastStepTimestamp = currentTime;
+
         // Update buffers
         hrBuffer.addLast(currentBpm);
-        stepsBuffer.addLast(currentSteps);
+        cadenceBuffer.addLast(currentCadence);
         
         if (hrBuffer.size() > BUFFER_5M_SIZE) hrBuffer.removeFirst();
-        if (stepsBuffer.size() > BUFFER_1M_SIZE) stepsBuffer.removeFirst(); // Activity trend only needs 1m
+        if (cadenceBuffer.size() > BUFFER_1M_SIZE) cadenceBuffer.removeFirst(); // Activity trend only needs 1m
         
         // Compute Temporal Features
         float hr1mAvg = computeAverage(hrBuffer, BUFFER_1M_SIZE);
@@ -88,7 +112,7 @@ public class BiometricClassifier {
             hrChangeRate = currentBpm - hrBuffer.getFirst();
         }
         
-        float activityTrend = computeAverage(stepsBuffer, BUFFER_1M_SIZE);
+        float activityTrend = computeAverage(cadenceBuffer, BUFFER_1M_SIZE);
         
         // Personalization
         // Update rolling baseline very slowly (e.g. over days) but for now it's static/set externally
@@ -102,7 +126,7 @@ public class BiometricClassifier {
         // [Current_HR, Current_Steps, HR_1m_Avg, HR_5m_Avg, HR_Change_Rate, Activity_Trend, User_Baseline_HR, HR_Baseline_Difference]
         float[][] input = new float[][]{{
             currentBpm, 
-            currentSteps, 
+            currentCadence, 
             hr1mAvg, 
             hr5mAvg, 
             hrChangeRate, 

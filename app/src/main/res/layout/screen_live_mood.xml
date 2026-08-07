@@ -155,10 +155,15 @@
                 android:orientation="horizontal"
                 android:padding="28dp">
 
-                <View
+                <TextView
+                    android:id="@+id/liveMoodEmoji"
                     android:layout_width="64dp"
                     android:layout_height="64dp"
-                    android:background="@drawable/circle_cyan" />
+                    android:background="@drawable/circle_cyan"
+                    android:gravity="center"
+                    android:text="⏳"
+                    android:textColor="#FFFFFF"
+                    android:textSize="32sp" />
 
                 <LinearLayout
                     android:layout_width="0dp"

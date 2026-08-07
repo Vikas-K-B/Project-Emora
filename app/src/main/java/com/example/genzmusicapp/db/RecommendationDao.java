@@ -7,11 +7,11 @@ import java.util.List;
 
 @Dao
 public interface RecommendationDao {
-    @Query("SELECT * FROM recommendation_cache WHERE mood = :mood ORDER BY finalScore DESC")
-    List<RecommendationCache> getRecommendationsForMood(String mood);
+    @Query("SELECT * FROM recommendation_cache WHERE mood = :mood")
+    RecommendationCache getRecommendationForMood(String mood);
 
-    @Insert
-    void insertAll(List<RecommendationCache> recommendations);
+    @Insert(onConflict = androidx.room.OnConflictStrategy.REPLACE)
+    void insert(RecommendationCache recommendation);
 
     @Query("DELETE FROM recommendation_cache WHERE mood = :mood")
     void clearCacheForMood(String mood);

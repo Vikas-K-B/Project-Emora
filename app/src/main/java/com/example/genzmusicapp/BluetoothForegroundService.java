@@ -415,7 +415,7 @@ public class BluetoothForegroundService extends Service {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             NotificationChannel channel = new NotificationChannel(
                     CHANNEL_ID,
-                    "MusicZ Background Service",
+                    "Emora Background Service",
                     NotificationManager.IMPORTANCE_LOW
             );
             NotificationManager manager = getSystemService(NotificationManager.class);
@@ -438,7 +438,7 @@ public class BluetoothForegroundService extends Service {
         );
 
         return new NotificationCompat.Builder(this, CHANNEL_ID)
-                .setContentTitle("MusicZ Sync Active")
+                .setContentTitle("Emora Sync Active")
                 .setContentText(contentText)
                 .setSmallIcon(R.mipmap.ic_launcher_round)
                 .setContentIntent(pendingIntent)

@@ -26,6 +26,7 @@ import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.location.LocationManager;
 import android.os.Build;
+import android.util.Log;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -101,6 +102,11 @@ import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
+import com.example.genzmusicapp.recommendation.RecommendationEngine;
+import com.example.genzmusicapp.recommendation.RecommendationManager;
+import com.example.genzmusicapp.recommendation.model.PlaylistResponse;
+import com.example.genzmusicapp.recommendation.model.SongRecommendation;
+
 import kotlin.coroutines.Continuation;
 import kotlin.coroutines.EmptyCoroutineContext;
 import kotlin.jvm.JvmClassMappingKt;
@@ -109,6 +115,7 @@ import kotlinx.coroutines.BuildersKt;
 import kotlinx.coroutines.CoroutineScope;
 
 public class MainActivity extends AppCompatActivity {
+    private static final String TAG = "MainActivity";
     private static final String SCREEN_SPLASH = "splash";
     private static final String SCREEN_LOGIN = "login";
     private static final String SCREEN_HOME = "home";
@@ -120,6 +127,8 @@ public class MainActivity extends AppCompatActivity {
     private static final String SCREEN_MAIN_SETTINGS = "main_settings";
     private static final String SCREEN_PROFILE = "profile";
     private static final String SCREEN_PROFILE_SETTINGS = "profile_settings";
+    private static final String SCREEN_HEALTH_CONNECT = "health_connect";
+    private static final String SCREEN_PRIVACY = "privacy";
 
     private static final String DEVICE_IMAGE_URL =
             "https://lh3.googleusercontent.com/aida-public/AB6AXuCwprrlfC4teTJ4gg_c0-xg_Ff94DbAN7TBpUFuDMPAeILcbS_2n4xN-e2PNM2hjeEba6SO9Fuv-CsOQ5dG2V034xMWo_3hUEbo75Ui-6Lc53Q2PF8hlj72yG6L89d6u_wHU-T6-piKm_IPGhKvp5gjUquChSZhNKjxSijVhmdmk__GPkuSWZdtvE2TXhlC4iaFdKKjX0CFjzdHvUsf2T5e9gWvrAUeFkk8mts6gRVvg5xhkkDvDN_Q9OqOZa0wPbvdiyOBAKjCoDQ";
@@ -156,8 +165,10 @@ public class MainActivity extends AppCompatActivity {
 
     private BluetoothForegroundService bluetoothService;
     private boolean isServiceBound = false;
-    private String currentMoodLabel = "Unknown";
+    private String currentMoodLabel = "Calibrating...";
     private String lastRecommendedMood = "";
+    
+    private RecommendationManager recommendationManager;
     private String previousScreenBeforeSettings = SCREEN_HOME;
     private int devModeTapCount = 0;
     private long lastDevModeTapTime = 0;
@@ -281,9 +292,22 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        
+        recommendationManager = new RecommendationManager(this);
+        
         EdgeToEdge.enable(this);
         setContentView(R.layout.activity_main);
         
+        getOnBackPressedDispatcher().addCallback(this, new androidx.activity.OnBackPressedCallback(true) {
+            @Override
+            public void handleOnBackPressed() {
+                if (!SCREEN_HOME.equals(currentScreen) && !SCREEN_LOGIN.equals(currentScreen)) {
+                    showScreen(SCREEN_HOME);
+                } else {
+                    finish();
+                }
+            }
+        });
 
         ViewCompat.setOnApplyWindowInsetsListener(findViewById(R.id.main), (view, insets) -> {
             Insets systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars());
@@ -438,7 +462,9 @@ public class MainActivity extends AppCompatActivity {
                             SharedPreferences.Editor editor = prefs.edit();
                             if (user.getDisplayName() != null) editor.putString("profileName", user.getDisplayName());
                             if (user.getEmail() != null) editor.putString("profileEmail", user.getEmail());
-                            if (user.getPhotoUrl() != null) editor.putString("profileImageUri", user.getPhotoUrl().toString());
+                            if (user.getPhotoUrl() != null && !prefs.contains("profileImageUri")) {
+                                editor.putString("profileImageUri", user.getPhotoUrl().toString());
+                            }
                             editor.apply();
                         }
                         showScreen(SCREEN_HOME);
@@ -577,6 +603,10 @@ public class MainActivity extends AppCompatActivity {
                 return R.layout.screen_preferences;
             case SCREEN_MAIN_SETTINGS:
                 return R.layout.screen_main_settings;
+            case SCREEN_HEALTH_CONNECT:
+                return R.layout.screen_health_connect;
+            case SCREEN_PRIVACY:
+                return R.layout.screen_privacy;
             case SCREEN_PROFILE:
                 return R.layout.screen_profile;
             default:
@@ -669,6 +699,10 @@ public class MainActivity extends AppCompatActivity {
             configureLoginScreen(content);
         } else if (SCREEN_PREFERENCES.equals(screen)) {
             configurePreferencesScreen(content);
+        } else if (SCREEN_HEALTH_CONNECT.equals(screen)) {
+            configureHealthConnectScreen(content);
+        } else if (SCREEN_PRIVACY.equals(screen)) {
+            configurePrivacyScreen(content);
         } else if (SCREEN_PROFILE.equals(screen)) {
             configureProfileScreen(content);
         } else if (SCREEN_WELLNESS.equals(screen)) {
@@ -774,7 +808,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void configurePreferencesScreen(View content) {
-        View backBtn = content.findViewById(R.id.backToWellnessButton);
+        View backBtn = content.findViewById(R.id.backFromPreferencesBtn);
         if (backBtn != null) {
             backBtn.setOnClickListener(v -> showScreen(SCREEN_MAIN_SETTINGS));
         }
@@ -906,7 +940,7 @@ public class MainActivity extends AppCompatActivity {
 
         View btnHealthConnect = content.findViewById(R.id.btnOpenHealthConnect);
         if (btnHealthConnect != null) {
-            btnHealthConnect.setOnClickListener(v -> android.widget.Toast.makeText(this, "Health Connect settings coming soon", android.widget.Toast.LENGTH_SHORT).show());
+            btnHealthConnect.setOnClickListener(v -> showScreen(SCREEN_HEALTH_CONNECT));
         }
 
         View btnAppearance = content.findViewById(R.id.btnOpenAppearance);
@@ -916,12 +950,12 @@ public class MainActivity extends AppCompatActivity {
 
         View btnPrivacy = content.findViewById(R.id.btnOpenPrivacy);
         if (btnPrivacy != null) {
-            btnPrivacy.setOnClickListener(v -> android.widget.Toast.makeText(this, "Privacy settings coming soon", android.widget.Toast.LENGTH_SHORT).show());
+            btnPrivacy.setOnClickListener(v -> showScreen(SCREEN_PRIVACY));
         }
 
         View btnAbout = content.findViewById(R.id.btnOpenAbout);
         if (btnAbout != null) {
-            btnAbout.setOnClickListener(v -> android.widget.Toast.makeText(this, "About MoodSync coming soon", android.widget.Toast.LENGTH_SHORT).show());
+            btnAbout.setOnClickListener(v -> android.widget.Toast.makeText(this, "About Emora coming soon", android.widget.Toast.LENGTH_SHORT).show());
         }
 
         View btnLogout = content.findViewById(R.id.btnLogout);
@@ -1002,6 +1036,38 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
+    private void configureHealthConnectScreen(View content) {
+        View backBtn = content.findViewById(R.id.backFromHealthConnectBtn);
+        if (backBtn != null) {
+            backBtn.setOnClickListener(v -> showScreen(SCREEN_MAIN_SETTINGS));
+        }
+        
+        Switch switchHealthConnect = content.findViewById(R.id.switchHealthConnect);
+        if (switchHealthConnect != null) {
+            SharedPreferences prefs = getSharedPreferences("MusicZPrefs", MODE_PRIVATE);
+            switchHealthConnect.setChecked(prefs.getBoolean("prefHealthConnectEnabled", false));
+            
+            switchHealthConnect.setOnCheckedChangeListener((btn, isChecked) -> {
+                if (isChecked) {
+                    int sdkStatus = androidx.health.connect.client.HealthConnectClient.getSdkStatus(this);
+                    if (sdkStatus != androidx.health.connect.client.HealthConnectClient.SDK_AVAILABLE) {
+                        switchHealthConnect.setChecked(false);
+                        Toast.makeText(this, "Health Connect is not supported or not installed on this device.", Toast.LENGTH_LONG).show();
+                        return;
+                    }
+                }
+                prefs.edit().putBoolean("prefHealthConnectEnabled", isChecked).apply();
+            });
+        }
+    }
+
+    private void configurePrivacyScreen(View content) {
+        View backBtn = content.findViewById(R.id.backFromPrivacyBtn);
+        if (backBtn != null) {
+            backBtn.setOnClickListener(v -> showScreen(SCREEN_MAIN_SETTINGS));
+        }
+    }
+
     private void configureHomeScreen(View content) {
         TextView welcomeText = content.findViewById(R.id.homeWelcomeText);
         if (welcomeText != null) {
@@ -1051,11 +1117,20 @@ public class MainActivity extends AppCompatActivity {
 
         if (tvScoreValue == null) return; // Layout not loaded properly
 
+        // Hide the stress timeline initially until a sync occurs
+        if (stressChart != null) {
+            View timelineCard = (View) stressChart.getParent();
+            if (timelineCard != null && timelineCard instanceof android.widget.LinearLayout) {
+                timelineCard.setVisibility(View.GONE);
+            }
+        }
+
         java.util.concurrent.Executors.newSingleThreadExecutor().execute(() -> {
             try {
+                String userId = mAuth.getCurrentUser() != null ? mAuth.getCurrentUser().getUid() : "guest";
+                int totalLogs = com.example.genzmusicapp.db.AppDatabase.getDatabase(this).wellnessDao().getTotalLogsCount(userId);
                 java.util.List<com.example.genzmusicapp.db.WellnessHistory> history =
-                        com.example.genzmusicapp.db.AppDatabase.getDatabase(this).wellnessDao().getRecentHistory(mAuth.getCurrentUser() != null ? mAuth.getCurrentUser().getUid() : "guest", 500);
-
+                        com.example.genzmusicapp.db.AppDatabase.getDatabase(this).wellnessDao().getRecentHistory(userId, 500);
                 runOnUiThread(() -> {
                     if (history == null || history.isEmpty()) {
                         tvScoreValue.setText("-- / 100");
@@ -1071,7 +1146,14 @@ public class MainActivity extends AppCompatActivity {
                     }
 
                     // 1. Weekly Logs
-                    tvWeeklyLogs.setText(history.size() + " logs");
+                    tvWeeklyLogs.setText(totalLogs + " logs");
+                    
+                    if (stressChart != null) {
+                        View timelineCard = (View) stressChart.getParent();
+                        if (timelineCard != null && timelineCard instanceof android.widget.LinearLayout) {
+                            timelineCard.setVisibility(View.VISIBLE);
+                        }
+                    }
 
                     // 2. Calculate Baseline HR and Variance
                     long totalHr = 0;
@@ -1150,17 +1232,28 @@ public class MainActivity extends AppCompatActivity {
                         tvScoreSubLabel.setText("Higher than normal variability.");
                     }
 
-                    // 5. Explainable AI Insight
-                    if (finalScore >= 80) {
-                        tvAiTitle.setText("Optimal Recovery State");
-                        tvAiDesc.setText("Your average HR is perfectly aligned at " + Math.round(avgHr) + " bpm. With " + Math.round(calmRatio * 100) + "% of your recent logs categorized as Calm/Relaxed and very low variance (" + String.format(java.util.Locale.US, "%.1f", stdDevHr) + " deviation), your nervous system is showing strong parasympathetic tone.");
-                    } else if (stressRatio > 0.4) {
-                        tvAiTitle.setText("High Stress Load Detected");
-                        tvAiDesc.setText("We noticed that " + Math.round(stressRatio * 100) + "% of your recent logs indicate stress. Your heart rate variability is elevated. We recommend utilizing the Binaural Beats playlist to trigger a parasympathetic response and lower your active stress.");
-                    } else {
-                        tvAiTitle.setText("Mixed Activity Patterns");
-                        tvAiDesc.setText("Your heart rate averages " + Math.round(avgHr) + " bpm with a mix of moods. The standard deviation is " + String.format(java.util.Locale.US, "%.1f", stdDevHr) + ", indicating frequent transitions between rest and activity. Maintain steady routines for better flow state.");
-                    }
+                    // 5. Explainable AI Insight (DYNAMIC via Gemini)
+                    tvAiTitle.setText("Analyzing patterns...");
+                    tvAiDesc.setText("Consulting AI Wellness Coach...");
+                    
+                    String prompt = "You are an AI wellness coach. Provide a short 2-sentence encouraging insight directly to the user based on these stats: Average HR is " + Math.round(avgHr) + " bpm. " + Math.round(stressRatio * 100) + "% of recent logs indicate stress. " + Math.round(calmRatio * 100) + "% indicate calm.";
+                    
+                    new com.example.genzmusicapp.recommendation.GeminiService().generatePlaylist("", prompt, new com.example.genzmusicapp.recommendation.GeminiService.GeminiCallback() {
+                        @Override
+                        public void onSuccess(String text) {
+                            runOnUiThread(() -> {
+                                tvAiTitle.setText(finalScore >= 80 ? "Optimal Recovery State" : (stressRatio > 0.4 ? "High Stress Load Detected" : "AI Wellness Insight"));
+                                tvAiDesc.setText(text);
+                            });
+                        }
+                        @Override
+                        public void onFailure(String error) {
+                            runOnUiThread(() -> {
+                                tvAiTitle.setText("AI Insight Unavailable");
+                                tvAiDesc.setText("Could not fetch real-time insight from Gemini. Ensure you have network connectivity.");
+                            });
+                        }
+                    });
 
                     // 6. Weekly Stress Timeline (Chart)
                     // Aggregate by day of week
@@ -1286,28 +1379,113 @@ public class MainActivity extends AppCompatActivity {
             if (sText != null) sText.setText("");
         }
 
-        RecommendationEngine.fetchAndRank(this, finalStressLevel, prefLanguage, prefGenres, prefArtists, new RecommendationEngine.RecommendationCallback() {
+        // Fetch recent and skipped lists
+        String recentTracksStr = prefs.getString("recently_recommended_tracks", "");
+        List<String> recent = new ArrayList<>(Arrays.asList(recentTracksStr.split(",")));
+        List<String> skipped = new ArrayList<>();
+        List<String> favorites = new ArrayList<>();
+
+        recommendationManager.fetchRecommendations(finalStressLevel, "", "Daytime", prefLanguage, prefGenres, prefArtists, recent, skipped, favorites, forceRefresh, new RecommendationManager.ManagerCallback() {
             @Override
-            public void onSuccess(List<RecommendationEngine.RankedSong> recommendations) {
+            public void onSuccess(PlaylistResponse playlist) {
                 handler.post(() -> {
-                    renderRecommendations(recommendations, finalStressLevel, prefLanguage);
+                    renderPlaylist(playlist);
                     refreshDiagnosticsUI();
                 });
             }
 
             @Override
-            public void onFailure(String error, List<RecommendationEngine.RankedSong> cachedRecommendations) {
-                handler.post(() -> {
-                    android.widget.Toast.makeText(MainActivity.this, error, android.widget.Toast.LENGTH_SHORT).show();
-                    if (cachedRecommendations != null && !cachedRecommendations.isEmpty()) {
-                        renderRecommendations(cachedRecommendations, finalStressLevel, prefLanguage);
-                    } else {
-                        if (loading != null) loading.setVisibility(android.view.View.GONE);
+            public void onFallback(String reason) {
+                // Fallback to existing rule-based engine
+                RecommendationEngine.fetchAndRankLegacy(MainActivity.this, finalStressLevel, prefLanguage, prefGenres, prefArtists, new RecommendationEngine.RecommendationCallback() {
+                    @Override
+                    public void onSuccess(List<RecommendationEngine.RankedSong> recommendations) {
+                        handler.post(() -> {
+                            renderRecommendations(recommendations, finalStressLevel, prefLanguage);
+                            refreshDiagnosticsUI();
+                        });
                     }
-                    refreshDiagnosticsUI();
+
+                    @Override
+                    public void onFailure(String error, List<RecommendationEngine.RankedSong> cachedRecommendations) {
+                        handler.post(() -> {
+                            android.widget.Toast.makeText(MainActivity.this, "Fallback failed: " + error, android.widget.Toast.LENGTH_SHORT).show();
+                            if (cachedRecommendations != null && !cachedRecommendations.isEmpty()) {
+                                renderRecommendations(cachedRecommendations, finalStressLevel, prefLanguage);
+                            } else {
+                                if (loading != null) loading.setVisibility(android.view.View.GONE);
+                            }
+                            refreshDiagnosticsUI();
+                        });
+                    }
                 });
             }
         });
+    }
+
+    private void renderPlaylist(PlaylistResponse playlist) {
+        if (currentContent == null || !SCREEN_PLAYER.equals(currentScreen)) return;
+
+        ProgressBar loading = currentContent.findViewById(R.id.recommendationLoading);
+        if (loading != null) loading.setVisibility(View.GONE);
+
+        TextView subtitle = currentContent.findViewById(R.id.recommendationSubtitle);
+        if (subtitle != null) subtitle.setText(playlist.playlistTitle + " - " + playlist.playlistDescription);
+
+        LinearLayout container = currentContent.findViewById(R.id.playerPlaylistContainer);
+        if (container == null) return;
+        container.removeAllViews();
+        
+        // Show the overall reason
+        if (playlist.overallReason != null && !playlist.overallReason.isEmpty()) {
+            TextView reasonView = new TextView(this);
+            reasonView.setText(playlist.overallReason);
+            reasonView.setTextColor(android.graphics.Color.CYAN);
+            reasonView.setPadding(10, 20, 10, 40);
+            reasonView.setTextSize(14f);
+            container.addView(reasonView);
+        }
+
+        if (playlist.songs == null || playlist.songs.isEmpty()) {
+            TextView emptyView = new TextView(this);
+            emptyView.setText("No songs found. Please change your preference settings.");
+            emptyView.setTextColor(android.graphics.Color.WHITE);
+            emptyView.setGravity(android.view.Gravity.CENTER);
+            emptyView.setPadding(0, 50, 0, 50);
+            container.addView(emptyView);
+            return;
+        }
+
+        for (SongRecommendation song : playlist.songs) {
+            try {
+                View itemView = LayoutInflater.from(this).inflate(R.layout.item_recommendation, container, false);
+
+                setTextIfPresent(itemView, R.id.itemSongName, song.title);
+                setTextIfPresent(itemView, R.id.itemArtistName, song.artist);
+                setTextIfPresent(itemView, R.id.itemGenre, song.genre);
+                setTextIfPresent(itemView, R.id.itemLanguage, "AI Selected");
+                setTextIfPresent(itemView, R.id.itemReason, song.reason);
+                setTextIfPresent(itemView, R.id.itemMatchScore, song.confidence + "% Match");
+
+                TextView matchScoreView = itemView.findViewById(R.id.itemMatchScore);
+                if (matchScoreView != null && song.confidence > 80) {
+                    matchScoreView.setTextColor(android.graphics.Color.parseColor("#4CAF50"));
+                }
+
+                ImageView artView = itemView.findViewById(R.id.itemAlbumArt);
+                if (artView != null && song.artworkUrl != null && !song.artworkUrl.isEmpty()) {
+                    loadImage(song.artworkUrl, artView);
+                }
+
+                itemView.setOnClickListener(v -> {
+                    resolveMusicTrack(song.trackId, song.title, song.artist);
+                });
+
+                container.addView(itemView);
+            } catch (Exception e) {
+                Log.e(TAG, "Error rendering song", e);
+            }
+        }
     }
     
 
@@ -1434,7 +1612,7 @@ public class MainActivity extends AppCompatActivity {
             
             intent.putExtra(android.app.SearchManager.QUERY, trackName + " " + artistName);
             intent.putExtra(android.provider.MediaStore.EXTRA_MEDIA_FOCUS, "vnd.android.cursor.item/audio");
-            intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK);
+            intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK | android.content.Intent.FLAG_ACTIVITY_CLEAR_TASK);
             startActivity(intent);
         } catch (android.content.ActivityNotFoundException e) {
             // Fallback to youtube search if no app handles the intent
@@ -1442,6 +1620,7 @@ public class MainActivity extends AppCompatActivity {
                 String query = java.net.URLEncoder.encode(trackName + " " + artistName, "UTF-8");
                 android.content.Intent browserIntent = new android.content.Intent(android.content.Intent.ACTION_VIEW, 
                         android.net.Uri.parse("https://www.youtube.com/results?search_query=" + query));
+                browserIntent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK | android.content.Intent.FLAG_ACTIVITY_CLEAR_TASK);
                 startActivity(browserIntent);
             } catch (Exception ex) {
                 Toast.makeText(this, "Could not open music app.", Toast.LENGTH_SHORT).show();
@@ -1962,6 +2141,15 @@ public class MainActivity extends AppCompatActivity {
             return;
         }
 
+        SharedPreferences prefs = getSharedPreferences("MusicZPrefs", MODE_PRIVATE);
+        boolean isEnabled = prefs.getBoolean("prefHealthConnectEnabled", false);
+        if (!isEnabled) {
+            if (requestIfMissing) {
+                android.widget.Toast.makeText(this, "Please enable Health Sync in Settings first.", android.widget.Toast.LENGTH_LONG).show();
+            }
+            return;
+        }
+
         if (healthConnectClient == null) {
             healthConnectClient = HealthConnectClient.getOrCreate(this);
         }
@@ -2104,6 +2292,21 @@ public class MainActivity extends AppCompatActivity {
         long steps = parseLongSafe(latestHealthSnapshot.stepsText);
         setTextIfPresent(root, R.id.liveMoodText, calculateLiveMood(bpm, steps));
         
+        String emoji = "⏳";
+        if (currentMoodLabel != null) {
+            String moodLower = currentMoodLabel.toLowerCase();
+            if (moodLower.contains("calm") || moodLower.contains("resting") || moodLower.contains("relax")) {
+                emoji = "😌";
+            } else if (moodLower.contains("focus") || moodLower.contains("energetic") || moodLower.contains("active")) {
+                emoji = "⚡";
+            } else if (moodLower.contains("stress") || moodLower.contains("anxious") || moodLower.contains("high")) {
+                emoji = "😰";
+            } else if (!moodLower.contains("calibrating")) {
+                emoji = "🎵";
+            }
+        }
+        setTextIfPresent(root, R.id.liveMoodEmoji, emoji);
+        
         PulseScannerView pulseScanner = root.findViewById(R.id.pulseScanner);
         if (pulseScanner != null && bpm > 0) {
             pulseScanner.setBpm((int) bpm);
@@ -2166,13 +2369,29 @@ public class MainActivity extends AppCompatActivity {
         }
 
         imageExecutor.execute(() -> {
-            Bitmap bitmap = downloadBitmap(url);
+            Bitmap bitmap = null;
+            if (url.startsWith("content://") || url.startsWith("file://")) {
+                try {
+                    android.net.Uri uri = android.net.Uri.parse(url);
+                    java.io.InputStream inputStream = getContentResolver().openInputStream(uri);
+                    if (inputStream != null) {
+                        bitmap = android.graphics.BitmapFactory.decodeStream(inputStream);
+                        inputStream.close();
+                    }
+                } catch (Exception e) {
+                    e.printStackTrace();
+                }
+            } else {
+                bitmap = downloadBitmap(url);
+            }
+            
             if (bitmap == null) {
                 return;
             }
 
             imageCache.put(url, bitmap);
-            handler.post(() -> imageView.setImageBitmap(bitmap));
+            Bitmap finalBitmap = bitmap;
+            handler.post(() -> imageView.setImageBitmap(finalBitmap));
         });
     }
 
@@ -2293,7 +2512,7 @@ public class MainActivity extends AppCompatActivity {
         }
 
         private static HealthSnapshot defaultValues() {
-            return new HealthSnapshot("74", "0", "84", "Connect to read today's heart rate and steps.");
+            return new HealthSnapshot("--", "--", "--", "Connect a device to read today's heart rate.");
         }
 
         private HealthSnapshot withStatus(String statusText) {

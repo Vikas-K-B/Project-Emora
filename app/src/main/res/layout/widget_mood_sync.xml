@@ -18,7 +18,7 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:fontFamily="sans-serif-medium"
-            android:text="MusicZ LIVE"
+            android:text="Emora LIVE"
             android:textColor="@color/mood_cyan"
             android:textSize="16sp"
             android:textStyle="bold" />

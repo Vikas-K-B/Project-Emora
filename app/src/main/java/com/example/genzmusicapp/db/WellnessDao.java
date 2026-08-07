@@ -12,4 +12,7 @@ public interface WellnessDao {
 
     @Insert
     void insert(WellnessHistory history);
+
+    @Query("SELECT COUNT(*) FROM wellness_history WHERE userId = :userId")
+    int getTotalLogsCount(String userId);
 }

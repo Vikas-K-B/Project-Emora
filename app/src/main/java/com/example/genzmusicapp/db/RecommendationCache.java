@@ -6,16 +6,14 @@ import androidx.annotation.NonNull;
 
 @Entity(tableName = "recommendation_cache")
 public class RecommendationCache {
-    @PrimaryKey(autoGenerate = true)
-    public long id;
-    
-    public String mood;
+    @PrimaryKey
     @NonNull
-    public String trackId;
-    public String jsonPayload;
-    public int finalScore;
-    
-    public RecommendationCache() {
-        trackId = "";
+    public String mood;
+    public String playlistJson;
+    public long timestamp;
+    public String preferencesHash;
+
+    public RecommendationCache(@NonNull String mood) {
+        this.mood = mood;
     }
 }

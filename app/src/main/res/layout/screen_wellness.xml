@@ -220,53 +220,7 @@
                     android:lineSpacingExtra="4dp"/>
             </LinearLayout>
 
-            <!-- Explainable Mood Analysis & AI Insight Card -->
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="22dp"
-                android:background="@drawable/glass_panel_rounded_32"
-                android:orientation="vertical"
-                android:padding="30dp">
 
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:background="@drawable/recommend_inner_stroke"
-                    android:gravity="center_vertical"
-                    android:orientation="vertical"
-                    android:padding="30dp">
-
-                    <TextView
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="AI WELLNESS INSIGHT"
-                        android:textColor="@color/mood_cyan"
-                        android:textSize="13sp"
-                        android:textStyle="bold" />
-
-                    <TextView
-                        android:id="@+id/tvExplainableAnalysisTitle"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="24dp"
-                        android:fontFamily="sans-serif-black"
-                        android:text="Analyzing Patterns..."
-                        android:textColor="@color/mood_text"
-                        android:textSize="32sp"
-                        android:textStyle="bold" />
-
-                    <TextView
-                        android:id="@+id/tvExplainableAnalysisDesc"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="16dp"
-                        android:lineSpacingExtra="5dp"
-                        android:text="Keep wearing your watch to accumulate baseline data. Explainable AI insights require at least a few hours of heart rate patterns."
-                        android:textColor="@color/mood_text"
-                        android:textSize="18sp" />
-                </LinearLayout>
-            </LinearLayout>
 
         </LinearLayout>
     </ScrollView>

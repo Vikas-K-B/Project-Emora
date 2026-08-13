@@ -619,29 +619,7 @@ public class MainActivity extends AppCompatActivity {
 
         TextView topBrand = content.findViewById(R.id.topBrand);
         if (topBrand != null) {
-            topBrand.setOnClickListener(view -> {
-                long now = System.currentTimeMillis();
-                if (now - lastDevModeTapTime > 1000) {
-                    devModeTapCount = 0;
-                }
-                lastDevModeTapTime = now;
-                devModeTapCount++;
-                
-                SharedPreferences prefs = getSharedPreferences("MusicZPrefs", MODE_PRIVATE);
-                boolean isDevMode = prefs.getBoolean("developer_mode", false);
-                
-                if (isDevMode) {
-                    showDiagnosticsDialog();
-                } else {
-                    if (devModeTapCount >= 7) {
-                        prefs.edit().putBoolean("developer_mode", true).apply();
-                        Toast.makeText(this, "Developer Mode Unlocked!", Toast.LENGTH_SHORT).show();
-                        showDiagnosticsDialog();
-                    } else if (devModeTapCount >= 4) {
-                        Toast.makeText(this, "Tap " + (7 - devModeTapCount) + " more times to unlock developer mode.", Toast.LENGTH_SHORT).show();
-                    }
-                }
-            });
+            // Developer mode unlock removed as per user request
         }
 
         ImageView settingsButton = content.findViewById(R.id.settingsButton);
@@ -962,6 +940,7 @@ public class MainActivity extends AppCompatActivity {
         if (btnLogout != null) {
             btnLogout.setOnClickListener(v -> {
                 android.widget.Toast.makeText(this, "Logged out successfully", android.widget.Toast.LENGTH_SHORT).show();
+                getSharedPreferences("MusicZPrefs", MODE_PRIVATE).edit().clear().apply();
                 mAuth.signOut();
                 mGoogleSignInClient.signOut().addOnCompleteListener(this, task -> {
                     showScreen(SCREEN_LOGIN);
@@ -1112,8 +1091,6 @@ public class MainActivity extends AppCompatActivity {
         TextView tvWeeklyLogs = content.findViewById(R.id.tvWeeklyLogs);
         com.example.genzmusicapp.StressChartView stressChart = content.findViewById(R.id.stressChart);
         TextView tvMoodDist = content.findViewById(R.id.tvMoodDistribution);
-        TextView tvAiTitle = content.findViewById(R.id.tvExplainableAnalysisTitle);
-        TextView tvAiDesc = content.findViewById(R.id.tvExplainableAnalysisDesc);
 
         if (tvScoreValue == null) return; // Layout not loaded properly
 
@@ -1140,8 +1117,6 @@ public class MainActivity extends AppCompatActivity {
                         tvBaselineHR.setText("-- bpm");
                         tvWeeklyLogs.setText("0 logs");
                         tvMoodDist.setText("Not enough data to calculate mood distribution.");
-                        tvAiTitle.setText("Gathering Baseline...");
-                        tvAiDesc.setText("Keep syncing your watch. Analytics require at least a few entries to generate an explainable analysis.");
                         return;
                     }
 
@@ -1176,7 +1151,7 @@ public class MainActivity extends AppCompatActivity {
                     int validMoodCount = 0;
                     for (com.example.genzmusicapp.db.WellnessHistory h : history) {
                         String mood = h.calculatedMood;
-                        if (mood != null && !mood.isEmpty() && !mood.equalsIgnoreCase("Unknown")) {
+                        if (mood != null && !mood.isEmpty() && !mood.equalsIgnoreCase("Unknown") && !mood.toLowerCase().contains("calibrating")) {
                             moodCounts.put(mood, moodCounts.getOrDefault(mood, 0) + 1);
                             validMoodCount++;
                         }
@@ -1231,29 +1206,6 @@ public class MainActivity extends AppCompatActivity {
                         tvScoreLabel.setTextColor(android.graphics.Color.parseColor("#ffb4ab")); // Red
                         tvScoreSubLabel.setText("Higher than normal variability.");
                     }
-
-                    // 5. Explainable AI Insight (DYNAMIC via Gemini)
-                    tvAiTitle.setText("Analyzing patterns...");
-                    tvAiDesc.setText("Consulting AI Wellness Coach...");
-                    
-                    String prompt = "You are an AI wellness coach. Provide a short 2-sentence encouraging insight directly to the user based on these stats: Average HR is " + Math.round(avgHr) + " bpm. " + Math.round(stressRatio * 100) + "% of recent logs indicate stress. " + Math.round(calmRatio * 100) + "% indicate calm.";
-                    
-                    new com.example.genzmusicapp.recommendation.GeminiService().generatePlaylist("", prompt, new com.example.genzmusicapp.recommendation.GeminiService.GeminiCallback() {
-                        @Override
-                        public void onSuccess(String text) {
-                            runOnUiThread(() -> {
-                                tvAiTitle.setText(finalScore >= 80 ? "Optimal Recovery State" : (stressRatio > 0.4 ? "High Stress Load Detected" : "AI Wellness Insight"));
-                                tvAiDesc.setText(text);
-                            });
-                        }
-                        @Override
-                        public void onFailure(String error) {
-                            runOnUiThread(() -> {
-                                tvAiTitle.setText("AI Insight Unavailable");
-                                tvAiDesc.setText("Could not fetch real-time insight from Gemini. Ensure you have network connectivity.");
-                            });
-                        }
-                    });
 
                     // 6. Weekly Stress Timeline (Chart)
                     // Aggregate by day of week

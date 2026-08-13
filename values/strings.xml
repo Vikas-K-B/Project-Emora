@@ -1,0 +1,18 @@
+<resources>
+    <string name="app_name">Emora</string>
+    <string name="brand_short">Emora</string>
+    <string name="splash_copy">Calibrating your digital sanctuary...</string>
+    <string name="profile_image">Profile image</string>
+    <string name="live_mood">Live mood</string>
+    <string name="nav_home">Home</string>
+    <string name="nav_mood">Mood</string>
+    <string name="nav_player">Player</string>
+    <string name="nav_wellness">Wellness</string>
+    <string name="health_connect">Health Connect</string>
+    <string name="health_connect_sync">Sync</string>
+    <string name="ble_live">Live Watch BLE</string>
+    <string name="ble_live_connect">Scan</string>
+    <string name="ble_live_status_default">Scan and choose your watch for instant live data.</string>
+    <string name="health_connect_privacy_title">Health data privacy</string>
+    <string name="health_connect_privacy_body">Emora reads heart rate and step count only after you grant Health Connect permission. The data is used to personalize the wellness dashboard and is not shared by this demo app.</string>
+</resources>
